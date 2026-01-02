@@ -1,0 +1,34 @@
+# Binaries
+frame
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of go coverage
+*.out
+
+# Go build cache
+__debug_bin*
+
+# IDE/Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Nix
+result
+result-*
+
+# Vendor (managed by go mod)
+vendor/

@@ -46,6 +46,12 @@
           # CGO is required for gotk4
           env.CGO_ENABLED = "1";
 
+          # Install desktop file
+          postInstall = ''
+            mkdir -p $out/share/applications
+            cp ${./frame.desktop} $out/share/applications/frame.desktop
+          '';
+
           meta = with pkgs.lib; {
             description = "A minimal image viewer for Linux with vim keybindings";
             homepage = "https://github.com/Hy4ri/frame";

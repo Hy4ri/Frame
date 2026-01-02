@@ -31,34 +31,3 @@ func GetHelpText() string {
   <tt>?</tt>           Show this help
   <tt>q</tt> / <tt>Esc</tt>    Quit`
 }
-
-// Binding represents a single keybinding
-type Binding struct {
-	Key         string
-	Description string
-	Action      string
-}
-
-// AllBindings returns all keybindings as a structured list
-func AllBindings() []Binding {
-	return []Binding{
-		{"h / ←", "Previous image", "prev"},
-		{"l / →", "Next image", "next"},
-		{"j / ↓", "Next image", "next"},
-		{"k / ↑", "Previous image", "prev"},
-		{"gg", "First image", "first"},
-		{"G", "Last image", "last"},
-		{"f", "Toggle fullscreen", "fullscreen"},
-		{"+/=", "Zoom in", "zoom_in"},
-		{"-", "Zoom out", "zoom_out"},
-		{"0", "Fit to window", "zoom_fit"},
-		{"1", "Original size", "zoom_original"},
-		{"r", "Rotate clockwise", "rotate_cw"},
-		{"R", "Rotate counter-clockwise", "rotate_ccw"},
-		{"d / Del", "Delete image", "delete"},
-		{"F2", "Rename image", "rename"},
-		{"i", "Show image info", "info"},
-		{"?", "Show help", "help"},
-		{"q / Esc", "Quit", "quit"},
-	}
-}

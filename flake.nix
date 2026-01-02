@@ -39,7 +39,7 @@
           version = "0.1.0";
           src = ./.;
 
-          vendorHash = null; # Will be updated after first build
+          vendorHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
           inherit buildInputs nativeBuildInputs;
 

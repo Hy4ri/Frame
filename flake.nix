@@ -44,7 +44,7 @@
           inherit buildInputs nativeBuildInputs;
 
           # CGO is required for gotk4
-          CGO_ENABLED = 1;
+          env.CGO_ENABLED = "1";
 
           meta = with pkgs.lib; {
             description = "A minimal image viewer for Linux with vim keybindings";
@@ -77,7 +77,7 @@
     // {
       # Overlay for NixOS integration
       overlays.default = final: prev: {
-        frame = self.packages.${prev.system}.default;
+        frame = self.packages.${prev.stdenv.hostPlatform.system}.default;
       };
     };
 }

@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Hy4ri/frame/internal/gui"
 	"github.com/Hy4ri/frame/internal/image"
-	"github.com/Hy4ri/frame/internal/ui"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
 )
 
@@ -29,7 +29,7 @@ var supportedExtensions = map[string]bool{
 // App holds the application state and manages image viewing
 type App struct {
 	gtkApp       *gtk.Application
-	window       *ui.Window
+	window       *gui.Window
 	images       []string // List of image paths in current directory
 	currentIndex int      // Index of currently displayed image
 	currentPath  string   // Path to current image or directory
@@ -53,7 +53,7 @@ func (a *App) Run() {
 	}
 
 	// Create the main window
-	a.window = ui.NewWindow(a.gtkApp, a)
+	a.window = gui.NewWindow(a.gtkApp, a)
 
 	// Display initial image if available
 	if len(a.images) > 0 {

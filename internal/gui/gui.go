@@ -1,5 +1,5 @@
-// Package ui provides GTK4 user interface components for Frame.
-package ui
+// Package gui provides GTK4 user interface components for Frame.
+package gui
 
 import (
 	"context"
@@ -200,15 +200,9 @@ func (w *Window) setupKeybindings() {
 	w.window.AddController(controller)
 }
 
-// applyStyles applies dark theme styling
+// applyStyles applies minimal custom styling while respecting user's system theme
 func (w *Window) applyStyles() {
-	// Request dark theme
-	settings := gtk.SettingsGetDefault()
-	if settings != nil {
-		settings.SetObjectProperty("gtk-application-prefer-dark-theme", true)
-	}
-
-	// Load custom CSS using modern API
+	// Load minimal CSS (only styles the image viewport with a dark background)
 	provider := gtk.NewCSSProvider()
 	provider.LoadFromString(StylesCSS)
 

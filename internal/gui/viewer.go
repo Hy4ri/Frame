@@ -1,4 +1,4 @@
-package ui
+package gui
 
 import (
 	"github.com/diamondburned/gotk4/pkg/gdk/v4"
@@ -37,6 +37,9 @@ func NewViewer() *Viewer {
 	v.picture.SetVAlign(gtk.AlignCenter)
 
 	v.widget.SetChild(v.picture)
+
+	// Apply dark background class for optimal image viewing
+	v.widget.AddCSSClass("image-viewport")
 
 	return v
 }

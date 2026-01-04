@@ -31,3 +31,32 @@ func GetHelpText() string {
   <tt>?</tt>           Show this help
   <tt>q</tt> / <tt>Esc</tt>    Quit`
 }
+
+// GetHelpTextPlain returns the plain text help for keybindings (no markup)
+func GetHelpTextPlain() string {
+	return `NAVIGATION
+  h / ←      Previous image
+  l / →      Next image
+  j / ↓      Next image
+  k / ↑      Previous image
+  gg         First image
+  G          Last image
+
+VIEW
+  f          Toggle fullscreen
+  + / =      Zoom in
+  -          Zoom out
+  0          Fit to window
+  1          Original size (1:1)
+
+IMAGE OPERATIONS
+  r          Rotate clockwise 90°
+  R          Rotate counter-clockwise 90°
+  d / Del    Delete image (to trash)
+  F2         Rename image
+  i          Show image info
+
+GENERAL
+  ?          Show this help
+  q / Esc    Quit`
+}

@@ -2,12 +2,14 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 
 	"github.com/Hy4ri/frame/internal/image"
 	"github.com/Hy4ri/frame/internal/keybindings"
 	"github.com/diamondburned/gotk4/pkg/gdk/v4"
+	"github.com/diamondburned/gotk4/pkg/gio/v2"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
 )
 
@@ -57,7 +59,7 @@ func NewWindow(gtkApp *gtk.Application, app AppController) *Window {
 
 	// Create header bar with minimal controls
 	w.headerBar = gtk.NewHeaderBar()
-	w.headerBar.SetShowTitleButtons(true)
+	w.headerBar.SetShowTitleButtons(false)
 
 	// Help button
 	helpBtn := gtk.NewButtonFromIconName("help-about-symbolic")
@@ -206,9 +208,9 @@ func (w *Window) applyStyles() {
 		settings.SetObjectProperty("gtk-application-prefer-dark-theme", true)
 	}
 
-	// Load custom CSS
+	// Load custom CSS using modern API
 	provider := gtk.NewCSSProvider()
-	provider.LoadFromData(StylesCSS)
+	provider.LoadFromString(StylesCSS)
 
 	display := gdk.DisplayGetDefault()
 	if display != nil {
@@ -218,7 +220,7 @@ func (w *Window) applyStyles() {
 
 // Show displays the window
 func (w *Window) Show() {
-	w.window.Show()
+	w.window.SetVisible(true)
 }
 
 // LoadImage loads and displays an image file
@@ -265,170 +267,385 @@ func (w *Window) RotateImage(clockwise bool) {
 	w.viewer.Rotate(clockwise)
 }
 
-// ShowFileChooser opens a file chooser dialog
+// ShowFileChooser opens a file chooser dialog using the modern FileDialog API
 func (w *Window) ShowFileChooser() {
-	dialog := gtk.NewFileChooserNative(
-		"Open Image",
-		&w.window.Window,
-		gtk.FileChooserActionOpen,
-		"Open",
-		"Cancel",
-	)
+	dialog := gtk.NewFileDialog()
+	dialog.SetTitle("Open Image")
 
 	// Add image filter
-	filter := gtk.NewFileFilter()
-	filter.SetName("Images")
-	filter.AddMIMEType("image/*")
-	dialog.AddFilter(filter)
+	filters := gio.NewListStore(gtk.GTypeFileFilter)
+	imageFilter := gtk.NewFileFilter()
+	imageFilter.SetName("Images")
+	imageFilter.AddMIMEType("image/*")
+	filters.Append(imageFilter.Object)
+	dialog.SetFilters(filters)
+	dialog.SetDefaultFilter(imageFilter)
 
-	dialog.ConnectResponse(func(response int) {
-		if response == int(gtk.ResponseAccept) {
-			file := dialog.File()
-			if file != nil {
-				path := file.Path()
-				if path != "" {
-					w.app.OpenPath(path)
-				}
+	dialog.Open(context.Background(), &w.window.Window, func(result gio.AsyncResulter) {
+		file, err := dialog.OpenFinish(result)
+		if err != nil {
+			return // User cancelled or error occurred
+		}
+		if file != nil {
+			path := file.Path()
+			if path != "" {
+				w.app.OpenPath(path)
 			}
 		}
 	})
-
-	dialog.Show()
 }
 
 // ShowDeleteConfirmation shows a confirmation dialog before deletion
 func (w *Window) ShowDeleteConfirmation(path string, callback func(bool)) {
-	dialog := gtk.NewMessageDialog(
-		&w.window.Window,
-		gtk.DialogModal|gtk.DialogDestroyWithParent,
-		gtk.MessageWarning,
-		gtk.ButtonsNone,
-	)
-	dialog.SetMarkup(fmt.Sprintf("<b>Delete image?</b>\n\n%s", filepath.Base(path)))
-	dialog.AddButton("Cancel", int(gtk.ResponseCancel))
-	dialog.AddButton("Move to Trash", int(gtk.ResponseAccept))
+	// Create a custom dialog window for delete confirmation
+	dialog := gtk.NewWindow()
+	dialog.SetTitle("Confirm Delete")
+	dialog.SetTransientFor(&w.window.Window)
+	dialog.SetModal(true)
+	dialog.SetDefaultSize(400, -1)
+	dialog.SetDestroyWithParent(true)
 
-	dialog.ConnectResponse(func(response int) {
-		callback(response == int(gtk.ResponseAccept))
-		dialog.Destroy()
+	// Main container
+	mainBox := gtk.NewBox(gtk.OrientationVertical, 16)
+	mainBox.SetMarginTop(24)
+	mainBox.SetMarginBottom(24)
+	mainBox.SetMarginStart(24)
+	mainBox.SetMarginEnd(24)
+
+	// Warning icon and message
+	headerBox := gtk.NewBox(gtk.OrientationHorizontal, 12)
+	headerBox.SetHAlign(gtk.AlignCenter)
+
+	icon := gtk.NewImageFromIconName("dialog-warning-symbolic")
+	icon.SetIconSize(gtk.IconSizeLarge)
+	headerBox.Append(icon)
+
+	titleLabel := gtk.NewLabel("Delete image?")
+	titleLabel.AddCSSClass("title-2")
+	headerBox.Append(titleLabel)
+
+	mainBox.Append(headerBox)
+
+	// File name
+	fileLabel := gtk.NewLabel(filepath.Base(path))
+	fileLabel.AddCSSClass("dim-label")
+	mainBox.Append(fileLabel)
+
+	// Detail text
+	detailLabel := gtk.NewLabel("This will move the image to the trash.")
+	mainBox.Append(detailLabel)
+
+	// Button box
+	buttonBox := gtk.NewBox(gtk.OrientationHorizontal, 8)
+	buttonBox.SetHAlign(gtk.AlignCenter)
+	buttonBox.SetMarginTop(12)
+
+	cancelBtn := gtk.NewButtonWithLabel("Cancel")
+	cancelBtn.ConnectClicked(func() {
+		callback(false)
+		dialog.Close()
 	})
+	buttonBox.Append(cancelBtn)
 
-	dialog.Show()
+	deleteBtn := gtk.NewButtonWithLabel("Move to Trash")
+	deleteBtn.AddCSSClass("destructive-action")
+	deleteBtn.ConnectClicked(func() {
+		callback(true)
+		dialog.Close()
+	})
+	buttonBox.Append(deleteBtn)
+
+	mainBox.Append(buttonBox)
+	dialog.SetChild(mainBox)
+
+	// Handle Escape key
+	controller := gtk.NewEventControllerKey()
+	controller.ConnectKeyPressed(func(keyval, keycode uint, state gdk.ModifierType) bool {
+		if keyval == gdk.KEY_Escape {
+			callback(false)
+			dialog.Close()
+			return true
+		}
+		return false
+	})
+	dialog.AddController(controller)
+
+	dialog.SetVisible(true)
 }
 
 // ShowRenameDialog shows a dialog to rename the current image
 func (w *Window) ShowRenameDialog(path string, callback func(string)) {
-	dialog := gtk.NewDialog()
+	// Create a custom dialog window
+	dialog := gtk.NewWindow()
 	dialog.SetTitle("Rename Image")
 	dialog.SetTransientFor(&w.window.Window)
 	dialog.SetModal(true)
 	dialog.SetDefaultSize(400, -1)
+	dialog.SetDestroyWithParent(true)
 
-	// Content area
-	content := dialog.ContentArea()
-	content.SetMarginTop(12)
-	content.SetMarginBottom(12)
-	content.SetMarginStart(12)
-	content.SetMarginEnd(12)
-	content.SetSpacing(12)
+	// Main container
+	mainBox := gtk.NewBox(gtk.OrientationVertical, 12)
+	mainBox.SetMarginTop(20)
+	mainBox.SetMarginBottom(20)
+	mainBox.SetMarginStart(20)
+	mainBox.SetMarginEnd(20)
 
+	// Label
 	label := gtk.NewLabel("New name:")
 	label.SetHAlign(gtk.AlignStart)
-	content.Append(label)
+	mainBox.Append(label)
 
+	// Entry
 	entry := gtk.NewEntry()
 	currentName := filepath.Base(path)
 	ext := filepath.Ext(currentName)
 	nameWithoutExt := currentName[:len(currentName)-len(ext)]
 	entry.SetText(nameWithoutExt)
-	entry.SetActivatesDefault(true)
-	content.Append(entry)
+	mainBox.Append(entry)
 
-	// Buttons
-	dialog.AddButton("Cancel", int(gtk.ResponseCancel))
-	dialog.AddButton("Rename", int(gtk.ResponseAccept))
-	dialog.SetDefaultResponse(int(gtk.ResponseAccept))
+	// Button box
+	buttonBox := gtk.NewBox(gtk.OrientationHorizontal, 8)
+	buttonBox.SetHAlign(gtk.AlignEnd)
+	buttonBox.SetMarginTop(12)
 
-	dialog.ConnectResponse(func(response int) {
-		if response == int(gtk.ResponseAccept) {
+	cancelBtn := gtk.NewButtonWithLabel("Cancel")
+	cancelBtn.ConnectClicked(func() {
+		callback("")
+		dialog.Close()
+	})
+	buttonBox.Append(cancelBtn)
+
+	renameBtn := gtk.NewButtonWithLabel("Rename")
+	renameBtn.AddCSSClass("suggested-action")
+	renameBtn.ConnectClicked(func() {
+		newName := entry.Text() + ext
+		callback(newName)
+		dialog.Close()
+	})
+	buttonBox.Append(renameBtn)
+
+	mainBox.Append(buttonBox)
+	dialog.SetChild(mainBox)
+
+	// Handle Enter key to submit
+	entryController := gtk.NewEventControllerKey()
+	entryController.ConnectKeyPressed(func(keyval, keycode uint, state gdk.ModifierType) bool {
+		if keyval == gdk.KEY_Return || keyval == gdk.KEY_KP_Enter {
 			newName := entry.Text() + ext
 			callback(newName)
-		} else {
-			callback("")
+			dialog.Close()
+			return true
 		}
-		dialog.Destroy()
+		if keyval == gdk.KEY_Escape {
+			callback("")
+			dialog.Close()
+			return true
+		}
+		return false
 	})
+	entry.AddController(entryController)
 
-	dialog.Show()
+	dialog.SetVisible(true)
 }
 
 // ShowInfoDialog displays image information
 func (w *Window) ShowInfoDialog(info *image.Info) {
-	dialog := gtk.NewMessageDialog(
-		&w.window.Window,
-		gtk.DialogModal|gtk.DialogDestroyWithParent,
-		gtk.MessageInfo,
-		gtk.ButtonsOK,
-	)
+	// Create a custom dialog window for info display
+	dialog := gtk.NewWindow()
+	dialog.SetTitle("Image Information")
+	dialog.SetTransientFor(&w.window.Window)
+	dialog.SetModal(true)
+	dialog.SetDefaultSize(450, -1)
+	dialog.SetDestroyWithParent(true)
 
-	markup := fmt.Sprintf(`<b>Image Information</b>
+	// Main container
+	mainBox := gtk.NewBox(gtk.OrientationVertical, 12)
+	mainBox.SetMarginTop(20)
+	mainBox.SetMarginBottom(20)
+	mainBox.SetMarginStart(20)
+	mainBox.SetMarginEnd(20)
 
-<b>File:</b> %s
-<b>Size:</b> %s
-<b>Dimensions:</b> %dx%d
-<b>Format:</b> %s
-<b>Modified:</b> %s`,
-		info.Name,
-		info.FileSize,
-		info.Width, info.Height,
-		info.Format,
-		info.Modified,
-	)
+	// Title
+	titleLabel := gtk.NewLabel("Image Information")
+	titleLabel.AddCSSClass("title-2")
+	mainBox.Append(titleLabel)
 
-	if info.ExifData != "" {
-		markup += fmt.Sprintf("\n\n<b>EXIF:</b>\n%s", info.ExifData)
+	// Info grid
+	grid := gtk.NewGrid()
+	grid.SetRowSpacing(8)
+	grid.SetColumnSpacing(16)
+	grid.SetMarginTop(12)
+
+	addInfoRow := func(row int, label, value string) {
+		labelWidget := gtk.NewLabel(label)
+		labelWidget.SetHAlign(gtk.AlignEnd)
+		labelWidget.AddCSSClass("dim-label")
+		grid.Attach(labelWidget, 0, row, 1, 1)
+
+		valueWidget := gtk.NewLabel(value)
+		valueWidget.SetHAlign(gtk.AlignStart)
+		valueWidget.SetSelectable(true)
+		grid.Attach(valueWidget, 1, row, 1, 1)
 	}
 
-	dialog.SetMarkup(markup)
+	addInfoRow(0, "File:", info.Name)
+	addInfoRow(1, "Size:", info.FileSize)
+	addInfoRow(2, "Dimensions:", fmt.Sprintf("%dx%d", info.Width, info.Height))
+	addInfoRow(3, "Format:", info.Format)
+	addInfoRow(4, "Modified:", info.Modified)
 
-	dialog.ConnectResponse(func(response int) {
-		dialog.Destroy()
+	mainBox.Append(grid)
+
+	// EXIF data if available
+	if info.ExifData != "" {
+		exifLabel := gtk.NewLabel("EXIF Data")
+		exifLabel.AddCSSClass("title-4")
+		exifLabel.SetMarginTop(16)
+		exifLabel.SetHAlign(gtk.AlignStart)
+		mainBox.Append(exifLabel)
+
+		exifContent := gtk.NewLabel(info.ExifData)
+		exifContent.SetHAlign(gtk.AlignStart)
+		exifContent.SetSelectable(true)
+		exifContent.SetWrap(true)
+		mainBox.Append(exifContent)
+	}
+
+	// OK button
+	okBtn := gtk.NewButtonWithLabel("OK")
+	okBtn.SetHAlign(gtk.AlignCenter)
+	okBtn.SetMarginTop(16)
+	okBtn.ConnectClicked(func() {
+		dialog.Close()
 	})
+	mainBox.Append(okBtn)
 
-	dialog.Show()
+	dialog.SetChild(mainBox)
+
+	// Handle Escape key
+	controller := gtk.NewEventControllerKey()
+	controller.ConnectKeyPressed(func(keyval, keycode uint, state gdk.ModifierType) bool {
+		if keyval == gdk.KEY_Escape || keyval == gdk.KEY_Return {
+			dialog.Close()
+			return true
+		}
+		return false
+	})
+	dialog.AddController(controller)
+
+	dialog.SetVisible(true)
 }
 
 // ShowHelpDialog displays keybindings help
 func (w *Window) ShowHelpDialog() {
-	dialog := gtk.NewMessageDialog(
-		&w.window.Window,
-		gtk.DialogModal|gtk.DialogDestroyWithParent,
-		gtk.MessageInfo,
-		gtk.ButtonsOK,
-	)
+	// Create a custom dialog window for help display
+	dialog := gtk.NewWindow()
+	dialog.SetTitle("Keyboard Shortcuts")
+	dialog.SetTransientFor(&w.window.Window)
+	dialog.SetModal(true)
+	dialog.SetDefaultSize(400, -1)
+	dialog.SetDestroyWithParent(true)
 
-	dialog.SetMarkup(keybindings.GetHelpText())
+	// Main container
+	mainBox := gtk.NewBox(gtk.OrientationVertical, 12)
+	mainBox.SetMarginTop(20)
+	mainBox.SetMarginBottom(20)
+	mainBox.SetMarginStart(20)
+	mainBox.SetMarginEnd(20)
 
-	dialog.ConnectResponse(func(response int) {
-		dialog.Destroy()
+	// Title
+	titleLabel := gtk.NewLabel("Keyboard Shortcuts")
+	titleLabel.AddCSSClass("title-2")
+	mainBox.Append(titleLabel)
+
+	// Help content
+	helpLabel := gtk.NewLabel(keybindings.GetHelpTextPlain())
+	helpLabel.SetHAlign(gtk.AlignStart)
+	helpLabel.SetMarginTop(12)
+	mainBox.Append(helpLabel)
+
+	// OK button
+	okBtn := gtk.NewButtonWithLabel("OK")
+	okBtn.SetHAlign(gtk.AlignCenter)
+	okBtn.SetMarginTop(16)
+	okBtn.ConnectClicked(func() {
+		dialog.Close()
 	})
+	mainBox.Append(okBtn)
 
-	dialog.Show()
+	dialog.SetChild(mainBox)
+
+	// Handle Escape key
+	controller := gtk.NewEventControllerKey()
+	controller.ConnectKeyPressed(func(keyval, keycode uint, state gdk.ModifierType) bool {
+		if keyval == gdk.KEY_Escape || keyval == gdk.KEY_Return {
+			dialog.Close()
+			return true
+		}
+		return false
+	})
+	dialog.AddController(controller)
+
+	dialog.SetVisible(true)
 }
 
 // ShowError displays an error message
 func (w *Window) ShowError(message string) {
-	dialog := gtk.NewMessageDialog(
-		&w.window.Window,
-		gtk.DialogModal|gtk.DialogDestroyWithParent,
-		gtk.MessageError,
-		gtk.ButtonsOK,
-	)
-	dialog.SetMarkup(fmt.Sprintf("<b>Error</b>\n\n%s", message))
+	// Create a custom dialog window for error display
+	dialog := gtk.NewWindow()
+	dialog.SetTitle("Error")
+	dialog.SetTransientFor(&w.window.Window)
+	dialog.SetModal(true)
+	dialog.SetDefaultSize(400, -1)
+	dialog.SetDestroyWithParent(true)
 
-	dialog.ConnectResponse(func(response int) {
-		dialog.Destroy()
+	// Main container
+	mainBox := gtk.NewBox(gtk.OrientationVertical, 16)
+	mainBox.SetMarginTop(24)
+	mainBox.SetMarginBottom(24)
+	mainBox.SetMarginStart(24)
+	mainBox.SetMarginEnd(24)
+
+	// Error icon and title
+	headerBox := gtk.NewBox(gtk.OrientationHorizontal, 12)
+	headerBox.SetHAlign(gtk.AlignCenter)
+
+	icon := gtk.NewImageFromIconName("dialog-error-symbolic")
+	icon.SetIconSize(gtk.IconSizeLarge)
+	headerBox.Append(icon)
+
+	titleLabel := gtk.NewLabel("Error")
+	titleLabel.AddCSSClass("title-2")
+	headerBox.Append(titleLabel)
+
+	mainBox.Append(headerBox)
+
+	// Error message
+	msgLabel := gtk.NewLabel(message)
+	msgLabel.SetWrap(true)
+	mainBox.Append(msgLabel)
+
+	// OK button
+	okBtn := gtk.NewButtonWithLabel("OK")
+	okBtn.SetHAlign(gtk.AlignCenter)
+	okBtn.SetMarginTop(12)
+	okBtn.ConnectClicked(func() {
+		dialog.Close()
 	})
+	mainBox.Append(okBtn)
 
-	dialog.Show()
+	dialog.SetChild(mainBox)
+
+	// Handle Escape key
+	controller := gtk.NewEventControllerKey()
+	controller.ConnectKeyPressed(func(keyval, keycode uint, state gdk.ModifierType) bool {
+		if keyval == gdk.KEY_Escape || keyval == gdk.KEY_Return {
+			dialog.Close()
+			return true
+		}
+		return false
+	})
+	dialog.AddController(controller)
+
+	dialog.SetVisible(true)
 }

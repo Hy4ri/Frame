@@ -15,17 +15,14 @@
       system: let
         pkgs = nixpkgs.legacyPackages.${system};
 
-        # GDK Pixbuf with WebP loader support
-        gdkPixbufWithWebp = pkgs.gdk-pixbuf.override {
-          extraLoaders = [pkgs.webp-pixbuf-loader];
-        };
-
         # Build dependencies for gotk4
         buildInputs = with pkgs; [
           gtk4
           glib
           gobject-introspection
-          gdkPixbufWithWebp
+          gdk-pixbuf
+          webp-pixbuf-loader # WebP image format support
+          librsvg # SVG support
           graphene
           cairo
           pango
@@ -57,6 +54,9 @@
             cp ${./frame.desktop} $out/share/applications/frame.desktop
           '';
 
+          # wrapGAppsHook4 should handle GDK_PIXBUF_MODULE_FILE automatically
+          # when webp-pixbuf-loader is in buildInputs
+
           meta = with pkgs.lib; {
             description = "A minimal image viewer for Linux with vim keybindings";
             homepage = "https://github.com/Hy4ri/frame";
@@ -79,8 +79,6 @@
           # Required for gotk4 to find GTK libraries
           shellHook = ''
             export CGO_ENABLED=1
-            # Set up GDK Pixbuf loaders for WebP support
-            export GDK_PIXBUF_MODULE_FILE="${gdkPixbufWithWebp}/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache"
             echo "Frame development environment loaded"
             echo "Run 'go build' to compile, or 'go run .' to run"
           '';

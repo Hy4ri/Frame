@@ -15,14 +15,25 @@
       system: let
         pkgs = nixpkgs.legacyPackages.${system};
 
+        # Generate a loaders.cache that includes WebP support
+        loadersCache =
+          pkgs.runCommand "gdk-pixbuf-loaders-cache" {
+            nativeBuildInputs = [pkgs.gdk-pixbuf];
+            GDK_PIXBUF_MODULEDIR = "${pkgs.webp-pixbuf-loader}/lib/gdk-pixbuf-2.0/2.10.0/loaders";
+          } ''
+            mkdir -p $out
+            gdk-pixbuf-query-loaders ${pkgs.gdk-pixbuf}/lib/gdk-pixbuf-2.0/2.10.0/loaders/*.so \
+              ${pkgs.webp-pixbuf-loader}/lib/gdk-pixbuf-2.0/2.10.0/loaders/*.so \
+              ${pkgs.librsvg}/lib/gdk-pixbuf-2.0/2.10.0/loaders/*.so \
+              > $out/loaders.cache
+          '';
+
         # Build dependencies for gotk4
         buildInputs = with pkgs; [
           gtk4
           glib
           gobject-introspection
           gdk-pixbuf
-          webp-pixbuf-loader # WebP image format support
-          librsvg # SVG support
           graphene
           cairo
           pango
@@ -48,14 +59,18 @@
           # CGO is required for gotk4
           env.CGO_ENABLED = "1";
 
-          # Install desktop file
+          # Install desktop file and set up WebP loader
           postInstall = ''
             mkdir -p $out/share/applications
             cp ${./frame.desktop} $out/share/applications/frame.desktop
           '';
 
-          # wrapGAppsHook4 should handle GDK_PIXBUF_MODULE_FILE automatically
-          # when webp-pixbuf-loader is in buildInputs
+          # Wrap the binary to set GDK_PIXBUF_MODULE_FILE for WebP support
+          preFixup = ''
+            gappsWrapperArgs+=(
+              --set GDK_PIXBUF_MODULE_FILE "${loadersCache}/loaders.cache"
+            )
+          '';
 
           meta = with pkgs.lib; {
             description = "A minimal image viewer for Linux with vim keybindings";
@@ -74,11 +89,14 @@
               gopls
               gotools
               go-tools
+              webp-pixbuf-loader
+              librsvg
             ]);
 
-          # Required for gotk4 to find GTK libraries
+          # Required for gotk4 to find GTK libraries and WebP loader
           shellHook = ''
             export CGO_ENABLED=1
+            export GDK_PIXBUF_MODULE_FILE="${loadersCache}/loaders.cache"
             echo "Frame development environment loaded"
             echo "Run 'go build' to compile, or 'go run .' to run"
           '';

@@ -32,3 +32,6 @@ result-*
 
 # Vendor (managed by go mod)
 vendor/
+
+#env
+*.direnv

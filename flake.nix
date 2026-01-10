@@ -15,12 +15,17 @@
       system: let
         pkgs = nixpkgs.legacyPackages.${system};
 
+        # GDK Pixbuf with WebP loader support
+        gdkPixbufWithWebp = pkgs.gdk-pixbuf.override {
+          extraLoaders = [pkgs.webp-pixbuf-loader];
+        };
+
         # Build dependencies for gotk4
         buildInputs = with pkgs; [
           gtk4
           glib
           gobject-introspection
-          gdk-pixbuf
+          gdkPixbufWithWebp
           graphene
           cairo
           pango
@@ -36,7 +41,7 @@
       in {
         packages.default = pkgs.buildGoModule {
           pname = "frame";
-          version = "0.1.0";
+          version = "0.2.0";
           src = ./.;
 
           vendorHash = "sha256-XPZ0zkKCc7CxjZpZvD2VaTpktGaBIQ1+oZRK7UpVX6M=";
@@ -74,6 +79,8 @@
           # Required for gotk4 to find GTK libraries
           shellHook = ''
             export CGO_ENABLED=1
+            # Set up GDK Pixbuf loaders for WebP support
+            export GDK_PIXBUF_MODULE_FILE="${gdkPixbufWithWebp}/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache"
             echo "Frame development environment loaded"
             echo "Run 'go build' to compile, or 'go run .' to run"
           '';

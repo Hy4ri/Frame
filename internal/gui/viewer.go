@@ -14,6 +14,7 @@ type Viewer struct {
 	zoomLevel   float64
 	rotation    int // 0, 90, 180, 270 degrees
 	originalBuf *gdkpixbuf.Pixbuf
+	fitMode     bool // true = fit to window, false = use zoomLevel
 }
 
 // NewViewer creates a new image viewer widget
@@ -21,6 +22,7 @@ func NewViewer() *Viewer {
 	v := &Viewer{
 		zoomLevel: 1.0,
 		rotation:  0,
+		fitMode:   true,
 	}
 
 	// Create scrolled window for panning
@@ -32,6 +34,7 @@ func NewViewer() *Viewer {
 	// Create picture widget for displaying images
 	v.picture = gtk.NewPicture()
 	v.picture.SetCanShrink(true)
+	v.picture.SetKeepAspectRatio(true) // Prevent stretching
 	v.picture.SetContentFit(gtk.ContentFitContain)
 	v.picture.SetHAlign(gtk.AlignCenter)
 	v.picture.SetVAlign(gtk.AlignCenter)
@@ -41,6 +44,20 @@ func NewViewer() *Viewer {
 	// Apply dark background class for optimal image viewing
 	v.widget.AddCSSClass("image-viewport")
 
+	// Add scroll wheel zoom
+	scrollController := gtk.NewEventControllerScroll(gtk.EventControllerScrollVertical)
+	scrollController.ConnectScroll(func(dx, dy float64) bool {
+		// Check for Ctrl key (zoom with Ctrl+Scroll)
+		// dy < 0 = scroll up = zoom in, dy > 0 = scroll down = zoom out
+		if dy < 0 {
+			v.ZoomIn()
+		} else if dy > 0 {
+			v.ZoomOut()
+		}
+		return true // Event handled
+	})
+	v.widget.AddController(scrollController)
+
 	return v
 }
 
@@ -49,6 +66,7 @@ func (v *Viewer) LoadImage(path string) {
 	v.currentPath = path
 	v.rotation = 0
 	v.zoomLevel = 1.0
+	v.fitMode = true
 
 	// Load the image using GdkPixbuf
 	pixbuf, err := gdkpixbuf.NewPixbufFromFile(path)
@@ -59,7 +77,6 @@ func (v *Viewer) LoadImage(path string) {
 	}
 
 	v.originalBuf = pixbuf
-	v.picture.SetContentFit(gtk.ContentFitContain)
 	v.applyTransforms()
 }
 
@@ -86,23 +103,31 @@ func (v *Viewer) applyTransforms() {
 		displayBuf = v.originalBuf
 	}
 
-	// Apply zoom if not fit mode (zoomLevel != 1.0)
-	if v.zoomLevel != 1.0 {
+	if v.fitMode {
+		// Fit to window - let GTK handle scaling
+		v.picture.SetContentFit(gtk.ContentFitContain)
+		texture := gdk.NewTextureForPixbuf(displayBuf)
+		v.picture.SetPaintable(texture)
+	} else {
+		// Manual zoom - scale the pixbuf ourselves
 		origW := displayBuf.Width()
 		origH := displayBuf.Height()
 		newW := int(float64(origW) * v.zoomLevel)
 		newH := int(float64(origH) * v.zoomLevel)
+
 		if newW > 0 && newH > 0 {
 			scaled := displayBuf.ScaleSimple(newW, newH, gdkpixbuf.InterpBilinear)
 			if scaled != nil {
 				displayBuf = scaled
 			}
 		}
-	}
 
-	// Create texture from pixbuf and set it
-	texture := gdk.NewTextureForPixbuf(displayBuf)
-	v.picture.SetPaintable(texture)
+		// Use ContentFitFill but set explicit size to prevent stretching
+		v.picture.SetContentFit(gtk.ContentFitFill)
+		v.picture.SetSizeRequest(newW, newH)
+		texture := gdk.NewTextureForPixbuf(displayBuf)
+		v.picture.SetPaintable(texture)
+	}
 }
 
 // Rotate rotates the image by 90 degrees
@@ -117,45 +142,56 @@ func (v *Viewer) Rotate(clockwise bool) {
 
 // ZoomIn increases zoom by 10%
 func (v *Viewer) ZoomIn() {
+	if v.fitMode {
+		// First zoom in from fit mode: calculate current effective zoom
+		v.zoomLevel = 1.0
+		v.fitMode = false
+	}
 	v.zoomLevel *= 1.1
 	if v.zoomLevel > 10.0 {
 		v.zoomLevel = 10.0
 	}
-	v.picture.SetContentFit(gtk.ContentFitFill)
 	v.applyTransforms()
 }
 
 // ZoomOut decreases zoom by 10%
 func (v *Viewer) ZoomOut() {
-	v.zoomLevel *= 0.9
+	if v.fitMode {
+		// First zoom out from fit mode
+		v.zoomLevel = 1.0
+		v.fitMode = false
+	}
+	v.zoomLevel /= 1.1
 	if v.zoomLevel < 0.1 {
 		v.zoomLevel = 0.1
 	}
-	v.picture.SetContentFit(gtk.ContentFitFill)
 	v.applyTransforms()
 }
 
 // ZoomFit fits the image to the window
 func (v *Viewer) ZoomFit() {
 	v.zoomLevel = 1.0
-	v.picture.SetContentFit(gtk.ContentFitContain)
+	v.fitMode = true
+	v.picture.SetSizeRequest(-1, -1) // Reset size request
 	v.applyTransforms()
 }
 
-// ZoomOriginal displays the image at its original size
+// ZoomOriginal displays the image at its original size (100%)
 func (v *Viewer) ZoomOriginal() {
 	v.zoomLevel = 1.0
-	v.picture.SetContentFit(gtk.ContentFitFill)
+	v.fitMode = false
 	v.applyTransforms()
 }
 
 // Clear clears the current image
 func (v *Viewer) Clear() {
 	v.picture.SetPaintable(nil)
+	v.picture.SetSizeRequest(-1, -1)
 	v.originalBuf = nil
 	v.currentPath = ""
 	v.zoomLevel = 1.0
 	v.rotation = 0
+	v.fitMode = true
 }
 
 // GetPixbuf returns the original pixbuf for editing

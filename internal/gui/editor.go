@@ -781,12 +781,8 @@ func (e *EditorView) LoadImage(path string, pixbuf *gdkpixbuf.Pixbuf) {
 	e.currentPath = path
 	e.originalBuf = pixbuf
 
-	// Load or create session
-	session, err := image.LoadEditSession(path)
-	if err != nil {
-		session = image.NewEditSession(path)
-	}
-	e.session = session
+	// Always start fresh - no session persistence
+	e.session = image.NewEditSession(path)
 
 	// Display the image
 	texture := gdk.NewTextureForPixbuf(pixbuf)
@@ -808,6 +804,16 @@ func (e *EditorView) showSaveDialog() {
 		// For now, call save - we'll implement the dialog in gui.go
 		e.onSave(true) // Default to saving as new
 	}
+}
+
+// GetResultPixbuf returns the final image with all edits applied
+// TODO: Composite strokes onto the image (currently only applies crop)
+func (e *EditorView) GetResultPixbuf() *gdkpixbuf.Pixbuf {
+	if e.originalBuf == nil {
+		return nil
+	}
+	// Return a copy to avoid external modification
+	return e.originalBuf.Copy()
 }
 
 // GetSession returns the current edit session

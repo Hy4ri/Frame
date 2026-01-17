@@ -4,7 +4,9 @@ package gui
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Hy4ri/frame/internal/image"
 	"github.com/Hy4ri/frame/internal/keybindings"
@@ -446,14 +448,70 @@ func (w *Window) saveEdits(asNew bool) {
 		return
 	}
 
-	// Save the session file (non-destructive)
-	if err := image.SaveEditSession(session); err != nil {
-		w.ShowError("Failed to save edits: " + err.Error())
+	// Get the final image
+	resultPixbuf := w.editor.GetResultPixbuf()
+	if resultPixbuf == nil {
+		w.ShowError("Failed to get image data")
 		return
 	}
 
-	// TODO: Implement actual image compositing and saving
-	// For now, just save the session and exit edit mode
+	// Determine output path
+	currentPath := w.editor.currentPath
+	ext := strings.ToLower(filepath.Ext(currentPath))
+	base := strings.TrimSuffix(filepath.Base(currentPath), filepath.Ext(currentPath))
+	dir := filepath.Dir(currentPath)
+
+	var outputPath string
+	if asNew {
+		// Auto-generate new filename
+		// Find a unique name
+		for i := 1; ; i++ {
+			outputPath = filepath.Join(dir, fmt.Sprintf("%s_edited_%d%s", base, i, ext))
+			if _, err := os.Stat(outputPath); os.IsNotExist(err) {
+				break
+			}
+		}
+	} else {
+		// Overwrite original
+		// Create backup first? Maybe later. For now, rely on git-like safety or user caution.
+		outputPath = currentPath
+	}
+
+	// Determine format
+	var format string
+	switch ext {
+	case ".jpg", ".jpeg":
+		format = "jpeg"
+	case ".png":
+		format = "png"
+	case ".webp":
+		format = "webp"
+	default:
+		// Default to PNG if unknown
+		format = "png"
+		if asNew {
+			outputPath = filepath.Join(dir, fmt.Sprintf("%s_edited_%d.png", base, 1))
+		}
+	}
+
+	// Save the image
+	// We can use empty options for now
+	if err := resultPixbuf.Savev(outputPath, format, []string{}, []string{}); err != nil {
+		w.ShowError("Failed to save image: " + err.Error())
+		return
+	}
+
+	// If saved as new, maybe open it?
+	if asNew {
+		// For now just notify
+		fmt.Printf("Saved to %s\n", outputPath)
+		// Optionally reload directory to show new file
+		w.app.OpenPath(dir)
+	} else {
+		// Reload current image to show changes in viewer
+		w.viewer.LoadImage(outputPath)
+	}
+
 	w.doExitEditMode()
 }
 

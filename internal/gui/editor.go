@@ -18,7 +18,6 @@ const (
 	ToolNone Tool = iota
 	ToolCrop
 	ToolPen
-	ToolEraser
 )
 
 // EditorView provides image editing functionality
@@ -338,9 +337,6 @@ func (e *EditorView) setupMouseEvents() {
 			e.currentStroke.Points = append(e.currentStroke.Points, image.Point{X: x, Y: y})
 			e.drawArea.QueueDraw()
 		}
-		if e.isDrawing && e.currentTool == ToolEraser {
-			e.eraseStrokesAt(x, y)
-		}
 		if e.isCropping {
 			e.cropEndX = x
 			e.cropEndY = y
@@ -357,9 +353,6 @@ func (e *EditorView) setupMouseEvents() {
 		switch e.currentTool {
 		case ToolPen:
 			e.startStroke(x, y)
-		case ToolEraser:
-			e.isDrawing = true
-			e.eraseStrokesAt(x, y)
 		case ToolCrop:
 			e.startCrop(x, y)
 		}
@@ -369,54 +362,12 @@ func (e *EditorView) setupMouseEvents() {
 		switch e.currentTool {
 		case ToolPen:
 			e.endStroke()
-		case ToolEraser:
-			e.isDrawing = false
 		case ToolCrop:
 			e.endCrop()
 		}
 	})
 
 	e.drawArea.AddController(gesture)
-}
-
-// eraseStrokesAt removes any strokes that intersect with the given point
-func (e *EditorView) eraseStrokesAt(x, y float64) {
-	if e.session == nil || len(e.session.Strokes) == 0 {
-		return
-	}
-
-	eraserRadius := e.brushSize / 2
-	strokesToRemove := []int{}
-
-	// Find strokes that intersect with eraser position
-	for i, stroke := range e.session.Strokes {
-		for _, pt := range stroke.Points {
-			dx := pt.X - x
-			dy := pt.Y - y
-			dist := dx*dx + dy*dy
-			threshold := (eraserRadius + stroke.BrushSize/2) * (eraserRadius + stroke.BrushSize/2)
-			if dist < threshold {
-				strokesToRemove = append(strokesToRemove, i)
-				break // Found intersection, no need to check more points
-			}
-		}
-	}
-
-	// Remove strokes in reverse order to preserve indices
-	if len(strokesToRemove) > 0 {
-		for i := len(strokesToRemove) - 1; i >= 0; i-- {
-			idx := strokesToRemove[i]
-			// Save for undo
-			e.pushUndo(image.EditAction{
-				Type:        "erase",
-				Data:        e.session.Strokes[idx],
-				Description: "Erase stroke",
-			})
-			// Remove stroke
-			e.session.Strokes = append(e.session.Strokes[:idx], e.session.Strokes[idx+1:]...)
-		}
-		e.drawArea.QueueDraw()
-	}
 }
 
 // startStroke begins a new drawing stroke (pen only)
@@ -490,13 +441,7 @@ func (e *EditorView) drawStroke(cr *cairo.Context, stroke *image.Stroke) {
 
 	// Parse color
 	r, g, b := parseHexColor(stroke.Color)
-
-	if stroke.Tool == "eraser" {
-		// For eraser, we use white (or transparent would be better with compositing)
-		cr.SetSourceRGBA(1, 1, 1, 1)
-	} else {
-		cr.SetSourceRGB(r, g, b)
-	}
+	cr.SetSourceRGB(r, g, b)
 
 	cr.SetLineWidth(stroke.BrushSize)
 	cr.SetLineCap(cairo.LineCapRound)
@@ -565,8 +510,8 @@ func (e *EditorView) selectTool(tool Tool) {
 func (e *EditorView) setTool(tool Tool) {
 	e.currentTool = tool
 
-	// Show/hide properties panel for brush tools
-	if tool == ToolPen || tool == ToolEraser {
+	// Show/hide properties panel for pen tool
+	if tool == ToolPen {
 		if e.propsPanel.Parent() == nil {
 			e.widget.InsertChildAfter(e.propsPanel, e.toolbar)
 		}

@@ -49,7 +49,7 @@
       in {
         packages.default = pkgs.buildGoModule {
           pname = "frame";
-          version = "0.2.0";
+          version = "0.3.0";
           src = ./.;
 
           vendorHash = "sha256-XPZ0zkKCc7CxjZpZvD2VaTpktGaBIQ1+oZRK7UpVX6M=";

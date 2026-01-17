@@ -157,3 +157,13 @@ func (v *Viewer) Clear() {
 	v.zoomLevel = 1.0
 	v.rotation = 0
 }
+
+// GetPixbuf returns the original pixbuf for editing
+func (v *Viewer) GetPixbuf() *gdkpixbuf.Pixbuf {
+	return v.originalBuf
+}
+
+// GetCurrentPath returns the current image path
+func (v *Viewer) GetCurrentPath() string {
+	return v.currentPath
+}

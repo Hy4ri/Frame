@@ -21,11 +21,20 @@ func GetHelpText() string {
   <tt>1</tt>           Original size (1:1)
 
 <b>Image Operations</b>
+  <tt>e</tt>           Enter edit mode
   <tt>r</tt>           Rotate clockwise 90°
   <tt>R</tt>           Rotate counter-clockwise 90°
   <tt>d</tt> / <tt>Del</tt>    Delete image (to trash)
   <tt>F2</tt>          Rename image
   <tt>i</tt>           Show image info
+
+<b>Edit Mode</b>
+  <tt>c</tt>           Crop tool
+  <tt>p</tt>           Pen tool
+  <tt>Ctrl+Z</tt>      Undo
+  <tt>Ctrl+Y</tt>      Redo
+  <tt>Ctrl+S</tt>      Save edits
+  <tt>Esc</tt>         Exit edit mode
 
 <b>General</b>
   <tt>?</tt>           Show this help
@@ -50,11 +59,20 @@ VIEW
   1          Original size (1:1)
 
 IMAGE OPERATIONS
+  e          Enter edit mode
   r          Rotate clockwise 90°
   R          Rotate counter-clockwise 90°
   d / Del    Delete image (to trash)
   F2         Rename image
   i          Show image info
+
+EDIT MODE
+  c          Crop tool
+  p          Pen tool
+  Ctrl+Z     Undo
+  Ctrl+Y     Redo
+  Ctrl+S     Save edits
+  Esc        Exit edit mode
 
 GENERAL
   ?          Show this help

@@ -40,9 +40,12 @@ type AppController interface {
 type Window struct {
 	window       *gtk.ApplicationWindow
 	headerBar    *gtk.HeaderBar
+	stack        *gtk.Stack
 	viewer       *Viewer
+	editor       *EditorView
 	app          AppController
 	isFullscreen bool
+	isEditMode   bool
 	gSequence    bool // Track if 'g' was pressed for 'gg' sequence
 }
 
@@ -69,6 +72,14 @@ func NewWindow(gtkApp *gtk.Application, app AppController) *Window {
 	})
 	w.headerBar.PackEnd(helpBtn)
 
+	// Edit button
+	editBtn := gtk.NewButtonFromIconName("document-edit-symbolic")
+	editBtn.SetTooltipText("Edit image (e)")
+	editBtn.ConnectClicked(func() {
+		w.EnterEditMode()
+	})
+	w.headerBar.PackEnd(editBtn)
+
 	// Open file button
 	openBtn := gtk.NewButtonFromIconName("document-open-symbolic")
 	openBtn.SetTooltipText("Open image or folder")
@@ -82,8 +93,19 @@ func NewWindow(gtkApp *gtk.Application, app AppController) *Window {
 	// Create the image viewer
 	w.viewer = NewViewer()
 
+	// Create the editor
+	w.editor = NewEditorView(w.handleEditorSave, w.ExitEditMode)
+
+	// Create stack for switching between viewer and editor
+	w.stack = gtk.NewStack()
+	w.stack.SetTransitionType(gtk.StackTransitionTypeCrossfade)
+	w.stack.SetTransitionDuration(200)
+	w.stack.AddNamed(w.viewer.widget, "viewer")
+	w.stack.AddNamed(w.editor.GetWidget(), "editor")
+	w.stack.SetVisibleChildName("viewer")
+
 	// Set up the main layout
-	w.window.SetChild(w.viewer.widget)
+	w.window.SetChild(w.stack)
 
 	// Set up keybindings
 	w.setupKeybindings()
@@ -99,9 +121,16 @@ func (w *Window) setupKeybindings() {
 	controller := gtk.NewEventControllerKey()
 
 	controller.ConnectKeyPressed(func(keyval, keycode uint, state gdk.ModifierType) bool {
-		// Check for shift modifier
+		// Check modifiers
 		shift := state&gdk.ShiftMask != 0
+		ctrl := state&gdk.ControlMask != 0
 
+		// Handle edit mode keybindings
+		if w.isEditMode {
+			return w.handleEditModeKeys(keyval, ctrl)
+		}
+
+		// View mode keybindings
 		switch keyval {
 		// Navigation
 		case gdk.KEY_h, gdk.KEY_Left:
@@ -131,6 +160,11 @@ func (w *Window) setupKeybindings() {
 		case gdk.KEY_G:
 			w.app.LastImage()
 			w.gSequence = false
+			return true
+
+		// Edit mode
+		case gdk.KEY_e:
+			w.EnterEditMode()
 			return true
 
 		// Fullscreen
@@ -200,6 +234,50 @@ func (w *Window) setupKeybindings() {
 	w.window.AddController(controller)
 }
 
+// handleEditModeKeys handles keybindings when in edit mode
+func (w *Window) handleEditModeKeys(keyval uint, ctrl bool) bool {
+	switch keyval {
+	// Exit edit mode
+	case gdk.KEY_Escape:
+		w.ExitEditMode()
+		return true
+
+	// Tool selection
+	case gdk.KEY_c:
+		w.editor.setTool(ToolCrop)
+		return true
+	case gdk.KEY_p:
+		w.editor.setTool(ToolPen)
+		return true
+
+	// Undo/Redo
+	case gdk.KEY_z:
+		if ctrl {
+			w.editor.Undo()
+			return true
+		}
+	case gdk.KEY_y:
+		if ctrl {
+			w.editor.Redo()
+			return true
+		}
+	case gdk.KEY_Z: // Ctrl+Shift+Z for redo
+		if ctrl {
+			w.editor.Redo()
+			return true
+		}
+
+	// Save
+	case gdk.KEY_s:
+		if ctrl {
+			w.ShowSaveDialog(true)
+			return true
+		}
+	}
+
+	return false
+}
+
 // applyStyles applies minimal custom styling while respecting user's system theme
 func (w *Window) applyStyles() {
 	// Load minimal CSS (only styles the image viewport with a dark background)
@@ -259,6 +337,172 @@ func (w *Window) ZoomOriginal() { w.viewer.ZoomOriginal() }
 // RotateImage rotates the current image
 func (w *Window) RotateImage(clockwise bool) {
 	w.viewer.Rotate(clockwise)
+}
+
+// EnterEditMode switches to the editor view
+func (w *Window) EnterEditMode() {
+	path := w.app.GetCurrentPath()
+	if path == "" {
+		return
+	}
+
+	// Load the image into editor
+	pixbuf := w.viewer.GetPixbuf()
+	if pixbuf == nil {
+		return
+	}
+
+	w.editor.LoadImage(path, pixbuf)
+	w.stack.SetVisibleChildName("editor")
+	w.isEditMode = true
+	w.window.SetTitle("Editing - " + filepath.Base(path))
+}
+
+// ExitEditMode returns to the viewer
+func (w *Window) ExitEditMode() {
+	if w.editor.HasUnsavedChanges() {
+		w.showDiscardConfirmation(func(discard bool) {
+			if discard {
+				w.doExitEditMode()
+			}
+		})
+	} else {
+		w.doExitEditMode()
+	}
+}
+
+// doExitEditMode performs the actual exit from edit mode
+func (w *Window) doExitEditMode() {
+	w.stack.SetVisibleChildName("viewer")
+	w.isEditMode = false
+	w.UpdateTitle(w.app.GetCurrentPath())
+}
+
+// handleEditorSave handles saving from the editor
+func (w *Window) handleEditorSave(asNew bool) {
+	w.ShowSaveDialog(asNew)
+}
+
+// ShowSaveDialog shows the save options dialog
+func (w *Window) ShowSaveDialog(defaultAsNew bool) {
+	dialog := gtk.NewWindow()
+	dialog.SetTitle("Save Edits")
+	dialog.SetTransientFor(&w.window.Window)
+	dialog.SetModal(true)
+	dialog.SetDefaultSize(400, -1)
+	dialog.SetDestroyWithParent(true)
+
+	mainBox := gtk.NewBox(gtk.OrientationVertical, 16)
+	mainBox.SetMarginTop(24)
+	mainBox.SetMarginBottom(24)
+	mainBox.SetMarginStart(24)
+	mainBox.SetMarginEnd(24)
+
+	titleLabel := gtk.NewLabel("Save Changes")
+	titleLabel.AddCSSClass("title-2")
+	mainBox.Append(titleLabel)
+
+	descLabel := gtk.NewLabel("How would you like to save your edits?")
+	mainBox.Append(descLabel)
+
+	buttonBox := gtk.NewBox(gtk.OrientationVertical, 8)
+	buttonBox.SetMarginTop(12)
+
+	// Save as new file button
+	newBtn := gtk.NewButtonWithLabel("Save as New Image")
+	newBtn.AddCSSClass("suggested-action")
+	newBtn.ConnectClicked(func() {
+		dialog.Close()
+		w.saveEdits(true)
+	})
+	buttonBox.Append(newBtn)
+
+	// Apply to original button
+	origBtn := gtk.NewButtonWithLabel("Apply to Original")
+	origBtn.AddCSSClass("destructive-action")
+	origBtn.ConnectClicked(func() {
+		dialog.Close()
+		w.saveEdits(false)
+	})
+	buttonBox.Append(origBtn)
+
+	// Cancel button
+	cancelBtn := gtk.NewButtonWithLabel("Cancel")
+	cancelBtn.SetMarginTop(8)
+	cancelBtn.ConnectClicked(func() {
+		dialog.Close()
+	})
+	buttonBox.Append(cancelBtn)
+
+	mainBox.Append(buttonBox)
+	dialog.SetChild(mainBox)
+	dialog.SetVisible(true)
+}
+
+// saveEdits saves the current edits
+func (w *Window) saveEdits(asNew bool) {
+	session := w.editor.GetSession()
+	if session == nil {
+		return
+	}
+
+	// Save the session file (non-destructive)
+	if err := image.SaveEditSession(session); err != nil {
+		w.ShowError("Failed to save edits: " + err.Error())
+		return
+	}
+
+	// TODO: Implement actual image compositing and saving
+	// For now, just save the session and exit edit mode
+	w.doExitEditMode()
+}
+
+// showDiscardConfirmation asks user to confirm discarding changes
+func (w *Window) showDiscardConfirmation(callback func(bool)) {
+	dialog := gtk.NewWindow()
+	dialog.SetTitle("Discard Changes?")
+	dialog.SetTransientFor(&w.window.Window)
+	dialog.SetModal(true)
+	dialog.SetDefaultSize(350, -1)
+	dialog.SetDestroyWithParent(true)
+
+	mainBox := gtk.NewBox(gtk.OrientationVertical, 16)
+	mainBox.SetMarginTop(24)
+	mainBox.SetMarginBottom(24)
+	mainBox.SetMarginStart(24)
+	mainBox.SetMarginEnd(24)
+
+	titleLabel := gtk.NewLabel("Discard unsaved changes?")
+	titleLabel.AddCSSClass("title-3")
+	mainBox.Append(titleLabel)
+
+	buttonBox := gtk.NewBox(gtk.OrientationHorizontal, 8)
+	buttonBox.SetHAlign(gtk.AlignCenter)
+	buttonBox.SetMarginTop(12)
+
+	cancelBtn := gtk.NewButtonWithLabel("Keep Editing")
+	cancelBtn.ConnectClicked(func() {
+		callback(false)
+		dialog.Close()
+	})
+	buttonBox.Append(cancelBtn)
+
+	discardBtn := gtk.NewButtonWithLabel("Discard")
+	discardBtn.AddCSSClass("destructive-action")
+	discardBtn.ConnectClicked(func() {
+		callback(true)
+		dialog.Close()
+	})
+	buttonBox.Append(discardBtn)
+
+	mainBox.Append(buttonBox)
+	dialog.SetChild(mainBox)
+	dialog.SetVisible(true)
+}
+
+// IsEditMode returns whether the window is in edit mode
+func (w *Window) IsEditMode() bool {
+	return w.isEditMode
 }
 
 // ShowFileChooser opens a file chooser dialog using the modern FileDialog API

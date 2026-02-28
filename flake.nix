@@ -15,61 +15,40 @@
       system: let
         pkgs = nixpkgs.legacyPackages.${system};
 
-        # Generate a loaders.cache that includes WebP support
-        loadersCache =
-          pkgs.runCommand "gdk-pixbuf-loaders-cache" {
-            nativeBuildInputs = [pkgs.gdk-pixbuf];
-            GDK_PIXBUF_MODULEDIR = "${pkgs.webp-pixbuf-loader}/lib/gdk-pixbuf-2.0/2.10.0/loaders";
-          } ''
-            mkdir -p $out
-            gdk-pixbuf-query-loaders ${pkgs.gdk-pixbuf}/lib/gdk-pixbuf-2.0/2.10.0/loaders/*.so \
-              ${pkgs.webp-pixbuf-loader}/lib/gdk-pixbuf-2.0/2.10.0/loaders/*.so \
-              ${pkgs.librsvg}/lib/gdk-pixbuf-2.0/2.10.0/loaders/*.so \
-              > $out/loaders.cache
-          '';
-
-        # Build dependencies for gotk4
+        # Fyne requires OpenGL and X11/Wayland headers
         buildInputs = with pkgs; [
-          gtk4
-          glib
-          gobject-introspection
-          gdk-pixbuf
-          graphene
-          cairo
-          pango
-          harfbuzz
+          libGL
+          mesa
+          xorg.libX11
+          xorg.libXcursor
+          xorg.libXrandr
+          xorg.libXinerama
+          xorg.libXi
+          xorg.libXxf86vm
+          wayland
+          libxkbcommon
         ];
 
         nativeBuildInputs = with pkgs; [
           go_1_26
           pkg-config
-          gobject-introspection
-          wrapGAppsHook4
         ];
       in {
         packages.default = (pkgs.buildGoModule.override {go = pkgs.go_1_26;}) {
           pname = "frame";
-          version = "0.3.0";
+          version = "0.5.0";
           src = ./.;
 
-          vendorHash = "sha256-DPCTeChREfjTB94Pgpie5XuPh26UPaKHIkPP7ArwQOo=";
+          vendorHash = null; # Will be updated after first build
 
           inherit buildInputs nativeBuildInputs;
 
-          # CGO is required for gotk4
           env.CGO_ENABLED = "1";
 
-          # Install desktop file and set up WebP loader
+          # Install desktop file
           postInstall = ''
             mkdir -p $out/share/applications
             cp ${./frame.desktop} $out/share/applications/frame.desktop
-          '';
-
-          # Wrap the binary to set GDK_PIXBUF_MODULE_FILE for WebP support
-          preFixup = ''
-            gappsWrapperArgs+=(
-              --set GDK_PIXBUF_MODULE_FILE "${loadersCache}/loaders.cache"
-            )
           '';
 
           meta = with pkgs.lib; {
@@ -89,14 +68,10 @@
               gopls
               gotools
               go-tools
-              webp-pixbuf-loader
-              librsvg
             ]);
 
-          # Required for gotk4 to find GTK libraries and WebP loader
           shellHook = ''
             export CGO_ENABLED=1
-            export GDK_PIXBUF_MODULE_FILE="${loadersCache}/loaders.cache"
             echo "Frame development environment loaded"
             echo "Run 'go build' to compile, or 'go run .' to run"
           '';

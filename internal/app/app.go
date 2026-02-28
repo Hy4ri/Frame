@@ -9,10 +9,9 @@ import (
 
 	"github.com/Hy4ri/frame/internal/gui"
 	"github.com/Hy4ri/frame/internal/image"
-	"github.com/diamondburned/gotk4/pkg/gtk/v4"
 )
 
-// supportedExtensions lists all image formats Frame can display
+// supportedExtensions lists all image formats Frame can display.
 var supportedExtensions = map[string]bool{
 	".jpg":  true,
 	".jpeg": true,
@@ -20,52 +19,45 @@ var supportedExtensions = map[string]bool{
 	".gif":  true,
 	".webp": true,
 	".bmp":  true,
-	".svg":  true,
 	".tiff": true,
 	".tif":  true,
 	".ico":  true,
 }
 
-// App holds the application state and manages image viewing
+// App holds the application state and manages image viewing.
 type App struct {
-	gtkApp       *gtk.Application
 	window       *gui.Window
 	images       []string // List of image paths in current directory
 	currentIndex int      // Index of currently displayed image
-	currentPath  string   // Path to current image or directory
+	initialPath  string   // Path to initial image or directory
 }
 
-// New creates a new Frame application instance
-func New(gtkApp *gtk.Application, initialPath string) *App {
-	app := &App{
-		gtkApp:       gtkApp,
-		currentPath:  initialPath,
+// New creates a new Frame application instance.
+func New(initialPath string) *App {
+	return &App{
+		initialPath:  initialPath,
 		currentIndex: 0,
 	}
-	return app
 }
 
-// Run initializes the UI and starts the application
+// Run initializes the UI and starts the application.
 func (a *App) Run() {
-	// Load images from path
-	if a.currentPath != "" {
-		a.loadImagesFromPath(a.currentPath)
+	if a.initialPath != "" {
+		a.loadImagesFromPath(a.initialPath)
 	}
 
-	// Create the main window
-	a.window = gui.NewWindow(a.gtkApp, a)
+	a.window = gui.NewWindow(a)
 
-	// Display initial image if available
 	if len(a.images) > 0 {
 		a.DisplayImage(a.currentIndex)
-	} else if a.currentPath == "" {
+	} else if a.initialPath == "" {
 		a.window.ShowFileChooser()
 	}
 
-	a.window.Show()
+	a.window.ShowAndRun()
 }
 
-// loadImagesFromPath populates the image list from a file or directory path
+// loadImagesFromPath populates the image list from a file or directory path.
 func (a *App) loadImagesFromPath(path string) {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -82,7 +74,6 @@ func (a *App) loadImagesFromPath(path string) {
 		targetFile = path
 	}
 
-	// Scan directory for images
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
@@ -99,18 +90,17 @@ func (a *App) loadImagesFromPath(path string) {
 		}
 	}
 
-	// Sort images by name
 	slices.Sort(a.images)
 
-	// If a specific file was provided, find its index
+	// Binary search since the list is sorted (O(log n) vs O(n))
 	if targetFile != "" {
-		if idx := slices.Index(a.images, targetFile); idx >= 0 {
+		if idx, found := slices.BinarySearch(a.images, targetFile); found {
 			a.currentIndex = idx
 		}
 	}
 }
 
-// DisplayImage loads and displays the image at the given index
+// DisplayImage loads and displays the image at the given index.
 func (a *App) DisplayImage(index int) {
 	if index < 0 || index >= len(a.images) {
 		return
@@ -119,35 +109,31 @@ func (a *App) DisplayImage(index int) {
 	a.window.LoadImage(a.images[index])
 }
 
-// Navigation methods for vim keybindings
-
-// NextImage displays the next image in the list
+// NextImage displays the next image in the list.
 func (a *App) NextImage() {
 	if a.currentIndex < len(a.images)-1 {
 		a.DisplayImage(a.currentIndex + 1)
 	}
 }
 
-// PrevImage displays the previous image in the list
+// PrevImage displays the previous image in the list.
 func (a *App) PrevImage() {
 	if a.currentIndex > 0 {
 		a.DisplayImage(a.currentIndex - 1)
 	}
 }
 
-// FirstImage jumps to the first image
+// FirstImage jumps to the first image.
 func (a *App) FirstImage() {
 	a.DisplayImage(0)
 }
 
-// LastImage jumps to the last image
+// LastImage jumps to the last image.
 func (a *App) LastImage() {
 	a.DisplayImage(len(a.images) - 1)
 }
 
-// Image operations
-
-// DeleteCurrent deletes the current image and moves to the next
+// DeleteCurrent deletes the current image and moves to the next.
 func (a *App) DeleteCurrent() {
 	if len(a.images) == 0 {
 		return
@@ -155,22 +141,18 @@ func (a *App) DeleteCurrent() {
 
 	currentPath := a.images[a.currentIndex]
 
-	// Confirm deletion via dialog
 	a.window.ShowDeleteConfirmation(currentPath, func(confirmed bool) {
 		if !confirmed {
 			return
 		}
 
-		// Move to trash (safer than permanent delete)
 		if err := image.MoveToTrash(currentPath); err != nil {
 			a.window.ShowError("Failed to delete: " + err.Error())
 			return
 		}
 
-		// Remove from list
 		a.images = append(a.images[:a.currentIndex], a.images[a.currentIndex+1:]...)
 
-		// Adjust index and display next image
 		if len(a.images) == 0 {
 			a.window.ClearImage()
 			return
@@ -182,7 +164,7 @@ func (a *App) DeleteCurrent() {
 	})
 }
 
-// RotateCurrent rotates the current image clockwise by 90 degrees
+// RotateCurrent rotates the current image.
 func (a *App) RotateCurrent(clockwise bool) {
 	if len(a.images) == 0 {
 		return
@@ -190,7 +172,7 @@ func (a *App) RotateCurrent(clockwise bool) {
 	a.window.RotateImage(clockwise)
 }
 
-// RenameCurrent opens a dialog to rename the current image
+// RenameCurrent opens a dialog to rename the current image.
 func (a *App) RenameCurrent() {
 	if len(a.images) == 0 {
 		return
@@ -208,13 +190,12 @@ func (a *App) RenameCurrent() {
 			return
 		}
 
-		// Update the path in our list
 		a.images[a.currentIndex] = newPath
 		a.window.UpdateTitle(newPath)
 	})
 }
 
-// ShowInfo displays information about the current image
+// ShowInfo displays information about the current image.
 func (a *App) ShowInfo() {
 	if len(a.images) == 0 {
 		return
@@ -227,44 +208,42 @@ func (a *App) ShowInfo() {
 	a.window.ShowInfoDialog(info)
 }
 
-// ShowHelp displays the keybindings help dialog
+// ShowHelp displays the keybindings help dialog.
 func (a *App) ShowHelp() {
 	a.window.ShowHelpDialog()
 }
 
-// ToggleFullscreen toggles fullscreen mode
+// ToggleFullscreen toggles fullscreen mode.
 func (a *App) ToggleFullscreen() {
 	a.window.ToggleFullscreen()
 }
 
-// Zoom operations
-
-// ZoomIn increases the zoom level
+// ZoomIn increases the zoom level.
 func (a *App) ZoomIn() {
 	a.window.ZoomIn()
 }
 
-// ZoomOut decreases the zoom level
+// ZoomOut decreases the zoom level.
 func (a *App) ZoomOut() {
 	a.window.ZoomOut()
 }
 
-// ZoomFit fits the image to the window
+// ZoomFit fits the image to the window.
 func (a *App) ZoomFit() {
 	a.window.ZoomFit()
 }
 
-// ZoomOriginal displays the image at its original size (1:1)
+// ZoomOriginal displays the image at its original size (1:1).
 func (a *App) ZoomOriginal() {
 	a.window.ZoomOriginal()
 }
 
-// Quit exits the application
+// Quit exits the application.
 func (a *App) Quit() {
-	a.gtkApp.Quit()
+	a.window.Close()
 }
 
-// GetCurrentPath returns the current image path
+// GetCurrentPath returns the current image path.
 func (a *App) GetCurrentPath() string {
 	if a.currentIndex < 0 || a.currentIndex >= len(a.images) {
 		return ""
@@ -272,17 +251,17 @@ func (a *App) GetCurrentPath() string {
 	return a.images[a.currentIndex]
 }
 
-// GetImageCount returns the total number of images
+// GetImageCount returns the total number of images.
 func (a *App) GetImageCount() int {
 	return len(a.images)
 }
 
-// GetCurrentIndex returns the current image index (1-based for display)
+// GetCurrentIndex returns the current image index (1-based for display).
 func (a *App) GetCurrentIndex() int {
 	return a.currentIndex + 1
 }
 
-// OpenPath opens a new file or directory
+// OpenPath opens a new file or directory.
 func (a *App) OpenPath(path string) {
 	a.loadImagesFromPath(path)
 	if len(a.images) > 0 {

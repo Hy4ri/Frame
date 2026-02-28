@@ -1,31 +1,38 @@
-// Package image provides image loading, operations, and metadata extraction.
+// Package image provides image operations and metadata extraction.
 package image
 
 import (
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
+
+	_ "golang.org/x/image/bmp"
+	_ "golang.org/x/image/tiff"
+	_ "golang.org/x/image/webp"
 )
 
-// MoveToTrash moves a file to the system trash using gio
+// MoveToTrash moves a file to the system trash using gio.
 func MoveToTrash(path string) error {
-	// Use gio trash command which works on most Linux desktops
 	cmd := exec.Command("gio", "trash", path)
 	if err := cmd.Run(); err != nil {
-		// Fallback: try to delete directly if gio is not available
+		// Fallback: delete directly if gio is not available
 		return os.Remove(path)
 	}
 	return nil
 }
 
-// Rename renames a file to a new name in the same directory
+// Rename renames a file to a new name in the same directory.
 func Rename(oldPath, newName string) (string, error) {
 	dir := filepath.Dir(oldPath)
 	newPath := filepath.Join(dir, newName)
 
-	// Check if target already exists
 	if _, err := os.Stat(newPath); err == nil {
 		return "", fmt.Errorf("file already exists: %s", newName)
 	}
@@ -37,7 +44,7 @@ func Rename(oldPath, newName string) (string, error) {
 	return newPath, nil
 }
 
-// Info contains metadata about an image file
+// Info contains metadata about an image file.
 type Info struct {
 	Name     string
 	Path     string
@@ -49,7 +56,7 @@ type Info struct {
 	ExifData string
 }
 
-// GetInfo retrieves metadata for an image file
+// GetInfo retrieves metadata for an image file.
 func GetInfo(path string) (*Info, error) {
 	stat, err := os.Stat(path)
 	if err != nil {
@@ -64,20 +71,34 @@ func GetInfo(path string) (*Info, error) {
 		Format:   getFormatFromExt(filepath.Ext(path)),
 	}
 
-	// Try to get image dimensions using identify command (ImageMagick)
-	// This is optional - if it fails, we just won't have dimensions
-	if dims, err := getImageDimensions(path); err == nil {
-		info.Width = dims[0]
-		info.Height = dims[1]
+	// Get image dimensions natively via Go's image decoders
+	if w, h, err := getImageDimensions(path); err == nil {
+		info.Width = w
+		info.Height = h
 	}
 
-	// Try to extract basic EXIF data
 	info.ExifData = getExifData(path)
 
 	return info, nil
 }
 
-// formatFileSize formats a file size in bytes to a human-readable string
+// getImageDimensions reads image dimensions using Go's native image decoders.
+// This replaces the previous ImageMagick `identify` dependency.
+func getImageDimensions(path string) (int, int, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer f.Close()
+
+	cfg, _, err := image.DecodeConfig(f)
+	if err != nil {
+		return 0, 0, err
+	}
+	return cfg.Width, cfg.Height, nil
+}
+
+// formatFileSize formats a file size in bytes to a human-readable string.
 func formatFileSize(bytes int64) string {
 	const (
 		KB = 1024
@@ -97,48 +118,29 @@ func formatFileSize(bytes int64) string {
 	}
 }
 
-// getFormatFromExt returns a format name based on file extension
-func getFormatFromExt(ext string) string {
-	formats := map[string]string{
-		".jpg":  "JPEG",
-		".jpeg": "JPEG",
-		".png":  "PNG",
-		".gif":  "GIF",
-		".webp": "WebP",
-		".bmp":  "BMP",
-		".svg":  "SVG",
-		".tiff": "TIFF",
-		".tif":  "TIFF",
-		".ico":  "ICO",
-	}
+// formatNames maps file extensions to human-readable format names.
+var formatNames = map[string]string{
+	".jpg":  "JPEG",
+	".jpeg": "JPEG",
+	".png":  "PNG",
+	".gif":  "GIF",
+	".webp": "WebP",
+	".bmp":  "BMP",
+	".tiff": "TIFF",
+	".tif":  "TIFF",
+	".ico":  "ICO",
+}
 
-	if format, ok := formats[ext]; ok {
+// getFormatFromExt returns a format name based on file extension.
+func getFormatFromExt(ext string) string {
+	if format, ok := formatNames[strings.ToLower(ext)]; ok {
 		return format
 	}
 	return "Unknown"
 }
 
-// getImageDimensions uses the 'file' command to get image dimensions
-func getImageDimensions(path string) ([2]int, error) {
-	// Try using 'identify' from ImageMagick if available
-	cmd := exec.Command("identify", "-format", "%w %h", path)
-	output, err := cmd.Output()
-	if err != nil {
-		return [2]int{0, 0}, err
-	}
-
-	var w, h int
-	_, err = fmt.Sscanf(string(output), "%d %d", &w, &h)
-	if err != nil {
-		return [2]int{0, 0}, err
-	}
-
-	return [2]int{w, h}, nil
-}
-
-// getExifData attempts to extract basic EXIF data using exiftool
+// getExifData attempts to extract basic EXIF data using exiftool.
 func getExifData(path string) string {
-	// Try using exiftool if available
 	cmd := exec.Command("exiftool", "-s", "-Make", "-Model", "-DateTimeOriginal", "-ExposureTime", "-FNumber", "-ISO", path)
 	output, err := cmd.Output()
 	if err != nil {

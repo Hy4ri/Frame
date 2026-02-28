@@ -41,18 +41,18 @@
         ];
 
         nativeBuildInputs = with pkgs; [
-          go
+          go_1_26
           pkg-config
           gobject-introspection
           wrapGAppsHook4
         ];
       in {
-        packages.default = pkgs.buildGoModule {
+        packages.default = (pkgs.buildGoModule.override {go = pkgs.go_1_26;}) {
           pname = "frame";
           version = "0.3.0";
           src = ./.;
 
-          vendorHash = "sha256-XPZ0zkKCc7CxjZpZvD2VaTpktGaBIQ1+oZRK7UpVX6M=";
+          vendorHash = "sha256-DPCTeChREfjTB94Pgpie5XuPh26UPaKHIkPP7ArwQOo=";
 
           inherit buildInputs nativeBuildInputs;
 

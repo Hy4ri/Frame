@@ -3,6 +3,7 @@ package gui
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/Hy4ri/frame/internal/image"
 	"github.com/diamondburned/gotk4/pkg/cairo"
@@ -807,25 +808,8 @@ func parseHexColor(hex string) (r, g, b float64) {
 	if len(hex) < 7 {
 		return 0, 0, 0
 	}
-	var ri, gi, bi int
-	_, _ = parseHex(hex[1:3], &ri)
-	_, _ = parseHex(hex[3:5], &gi)
-	_, _ = parseHex(hex[5:7], &bi)
+	ri, _ := strconv.ParseUint(hex[1:3], 16, 8)
+	gi, _ := strconv.ParseUint(hex[3:5], 16, 8)
+	bi, _ := strconv.ParseUint(hex[5:7], 16, 8)
 	return float64(ri) / 255, float64(gi) / 255, float64(bi) / 255
-}
-
-// parseHex parses a hex string to an int (simple implementation)
-func parseHex(s string, result *int) (int, error) {
-	*result = 0
-	for _, c := range s {
-		*result *= 16
-		if c >= '0' && c <= '9' {
-			*result += int(c - '0')
-		} else if c >= 'a' && c <= 'f' {
-			*result += int(c-'a') + 10
-		} else if c >= 'A' && c <= 'F' {
-			*result += int(c-'A') + 10
-		}
-	}
-	return *result, nil
 }

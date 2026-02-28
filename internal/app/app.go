@@ -4,7 +4,7 @@ package app
 import (
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/Hy4ri/frame/internal/gui"
@@ -88,7 +88,7 @@ func (a *App) loadImagesFromPath(path string) {
 		return
 	}
 
-	a.images = nil
+	a.images = make([]string, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -100,15 +100,12 @@ func (a *App) loadImagesFromPath(path string) {
 	}
 
 	// Sort images by name
-	sort.Strings(a.images)
+	slices.Sort(a.images)
 
 	// If a specific file was provided, find its index
 	if targetFile != "" {
-		for i, img := range a.images {
-			if img == targetFile {
-				a.currentIndex = i
-				break
-			}
+		if idx := slices.Index(a.images, targetFile); idx >= 0 {
+			a.currentIndex = idx
 		}
 	}
 }

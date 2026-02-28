@@ -36,9 +36,9 @@ type Point struct {
 
 // EditAction represents an undoable action for the history stack
 type EditAction struct {
-	Type        string      `json:"type"` // "crop", "stroke", "clear"
-	Data        interface{} `json:"data"` // The action-specific data
-	Description string      `json:"description"`
+	Type        string `json:"type"` // "crop", "stroke", "clear"
+	Data        any    `json:"data"` // The action-specific data
+	Description string `json:"description"`
 }
 
 // NewEditSession creates a new empty edit session for an image

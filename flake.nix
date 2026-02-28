@@ -19,12 +19,12 @@
         buildInputs = with pkgs; [
           libGL
           mesa
-          xorg.libX11
-          xorg.libXcursor
-          xorg.libXrandr
-          xorg.libXinerama
-          xorg.libXi
-          xorg.libXxf86vm
+          libx11
+          libxcursor
+          libxrandr
+          libxinerama
+          libxi
+          libxxf86vm
           wayland
           libxkbcommon
         ];
@@ -39,7 +39,7 @@
           version = "0.5.0";
           src = ./.;
 
-          vendorHash = null; # Will be updated after first build
+          vendorHash = pkgs.lib.fakeHash;
 
           inherit buildInputs nativeBuildInputs;
 

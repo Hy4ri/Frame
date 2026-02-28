@@ -39,7 +39,7 @@
           version = "0.5.0";
           src = ./.;
 
-          vendorHash = pkgs.lib.fakeHash;
+          vendorHash = "sha256-flYhCnR/z9+WsaxK1ZK4fd1IRXGMFsf4LKewqLxXG+w=";
 
           inherit buildInputs nativeBuildInputs;
 

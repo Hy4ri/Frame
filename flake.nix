@@ -39,7 +39,7 @@
           version = "0.6.0";
           src = ./.;
 
-          vendorHash = "sha256-flYhCnR/z9+WsaxK1ZK4fd1IRXGMFsf4LKewqLxXG+w=";
+          vendorHash = "sha256-qtwMo29HzrB5y4oxXK+dUKioqQGk0+4BBuLpNIg3pZM=";
 
           inherit buildInputs nativeBuildInputs;
 

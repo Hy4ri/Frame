@@ -129,6 +129,7 @@ var formatNames = map[string]string{
 	".tiff": "TIFF",
 	".tif":  "TIFF",
 	".ico":  "ICO",
+	".apng": "APNG",
 }
 
 // getFormatFromExt returns a format name based on file extension.

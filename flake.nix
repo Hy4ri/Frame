@@ -36,7 +36,7 @@
       in {
         packages.default = (pkgs.buildGoModule.override {go = pkgs.go_1_26;}) {
           pname = "frame";
-          version = "0.5.0";
+          version = "0.6.0";
           src = ./.;
 
           vendorHash = "sha256-flYhCnR/z9+WsaxK1ZK4fd1IRXGMFsf4LKewqLxXG+w=";

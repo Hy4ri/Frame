@@ -11,7 +11,7 @@ A fast, minimal image viewer for Linux with vim keybindings, built with Go and [
 - **Image Operations** — Delete, rotate, rename images
 - **Image Info** — View dimensions, file size, format, and EXIF data
 - **Dark Theme** — Easy on the eyes
-- **Format Support** — JPEG, PNG, GIF (animated), WebP, BMP, TIFF, ICO
+- **Format Support** — JPEG, PNG, GIF (animated), APNG (animated), WebP, BMP, TIFF, ICO
 
 ## Installation
 

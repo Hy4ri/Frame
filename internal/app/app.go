@@ -22,6 +22,7 @@ var supportedExtensions = map[string]bool{
 	".tiff": true,
 	".tif":  true,
 	".ico":  true,
+	".apng": true,
 }
 
 // App holds the application state and manages image viewing.

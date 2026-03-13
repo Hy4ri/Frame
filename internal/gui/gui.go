@@ -246,7 +246,7 @@ func (w *Window) ShowFileChooser() {
 
 	// Set image filter
 	fd.SetFilter(storage.NewExtensionFileFilter([]string{
-		".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff", ".tif", ".ico",
+		".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff", ".tif", ".ico", ".apng",
 	}))
 
 	fd.Show()

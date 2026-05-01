@@ -2,7 +2,9 @@ package gui
 
 import (
 	goimage "image"
+	godraw "image/draw"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -16,14 +18,20 @@ import (
 type Viewer struct {
 	scroll      *container.Scroll
 	imageCanvas *canvas.Image
-	originalImg goimage.Image
+	cache       *imageCache
+
+	// loadGen is atomically incremented on each LoadImage call.
+	// Background decode goroutines check this before committing their
+	// result, so stale loads from rapid navigation are silently discarded.
+	loadGen uint64
 
 	// mu protects all fields below it, as they are read by the animation
 	// goroutine and written by UI-thread methods.
-	mu        sync.Mutex
-	zoomLevel float64
-	rotation  int // 0, 90, 180, 270 degrees
-	fitMode   bool
+	mu          sync.Mutex
+	originalImg goimage.Image
+	zoomLevel   float64
+	rotation    int // 0, 90, 180, 270 degrees
+	fitMode     bool
 
 	// Animation state (also protected by mu)
 	anim       *animation.Animation
@@ -38,6 +46,7 @@ func NewViewer() *Viewer {
 		zoomLevel: 1.0,
 		rotation:  0,
 		fitMode:   true,
+		cache:     newImageCache(defaultCacheCapacity),
 	}
 
 	v.imageCanvas = canvas.NewImageFromImage(nil)
@@ -56,7 +65,11 @@ func (v *Viewer) Widget() fyne.CanvasObject {
 
 // LoadImage loads and displays an image from the given path.
 // If the image is animated (multi-frame GIF or APNG), it starts playback.
+// For static images, a cache hit displays instantly; a cache miss triggers
+// an async decode guarded by a generation counter.
 func (v *Viewer) LoadImage(path string) {
+	gen := atomic.AddUint64(&v.loadGen, 1)
+
 	v.stopAnimation()
 
 	v.mu.Lock()
@@ -65,40 +78,93 @@ func (v *Viewer) LoadImage(path string) {
 	v.fitMode = true
 	v.mu.Unlock()
 
-	// Try animated decode for .gif and explicit .apng files only.
-	// Static .png files skip this path to avoid the extra decode overhead.
+	// Animated images are never cached (they have their own frame buffer).
 	if animation.IsAnimatable(path) {
-		anim, err := animation.Decode(path)
-		if err == nil && anim != nil {
+		// Animated decode can be expensive — run in background.
+		go func() {
+			anim, err := animation.Decode(path)
+			if err != nil || anim == nil {
+				// Not animated or decode error — fall through to static.
+				// Inline the decode here instead of calling loadStaticAsync
+				// to avoid spawning a redundant nested goroutine.
+				v.decodeAndCommitStatic(path, gen)
+				return
+			}
+			if atomic.LoadUint64(&v.loadGen) != gen {
+				return // user navigated away
+			}
 			v.mu.Lock()
 			v.anim = anim
 			v.isAnimated = true
-			v.originalImg = anim.Frames[0]
+			firstFrame, _ := anim.Frame(0)
+			v.originalImg = firstFrame
 			v.mu.Unlock()
 			v.startAnimation()
-			return
-		}
-		// Not animated or decode error — fall through to static loading.
-	}
-
-	img, err := LoadImageFromFile(path)
-	if err != nil {
-		v.imageCanvas.Image = nil
-		v.imageCanvas.Refresh()
+		}()
 		return
 	}
 
+	// Static image: check cache first for instant display.
+	if img, ok := v.cache.Get(path); ok {
+		v.mu.Lock()
+		v.originalImg = img
+		v.mu.Unlock()
+		v.applyTransforms()
+		return
+	}
+
+	// Cache miss — decode in the background.
+	go v.decodeAndCommitStatic(path, gen)
+}
+
+// decodeAndCommitStatic decodes a static image and commits it only if the
+// generation counter still matches. Called directly (not via goroutine)
+// when already running in a background goroutine.
+func (v *Viewer) decodeAndCommitStatic(path string, gen uint64) {
+	img, err := LoadImageFromFile(path)
+	if err != nil {
+		if atomic.LoadUint64(&v.loadGen) == gen {
+			v.imageCanvas.Image = nil
+			v.imageCanvas.Refresh()
+		}
+		return
+	}
+
+	v.cache.Put(path, img)
+
+	if atomic.LoadUint64(&v.loadGen) != gen {
+		return // stale — user already moved on
+	}
+
+	v.mu.Lock()
 	v.originalImg = img
+	v.mu.Unlock()
 	v.applyTransforms()
 }
 
-// startAnimation launches a goroutine that cycles through animation frames.
+// PrefetchImage decodes an image into the cache without displaying it.
+// Called by the app layer to warm the cache for adjacent images.
+func (v *Viewer) PrefetchImage(path string) {
+	if _, ok := v.cache.Get(path); ok {
+		return // already cached
+	}
+	if animation.IsAnimatable(path) {
+		return // don't prefetch animations
+	}
+	img, err := LoadImageFromFile(path)
+	if err == nil {
+		v.cache.Put(path, img)
+	}
+}
+
+// startAnimation launches a goroutine that cycles through animation frames
+// using the streaming Animation.Frame() API.
 func (v *Viewer) startAnimation() {
 	v.mu.Lock()
 	anim := v.anim
 	v.mu.Unlock()
 
-	if anim == nil || len(anim.Frames) <= 1 {
+	if anim == nil || anim.FrameCount <= 1 {
 		return
 	}
 
@@ -115,12 +181,17 @@ func (v *Viewer) startAnimation() {
 
 		loops := 0
 		for {
-			for i, frame := range anim.Frames {
+			for i := 0; i < anim.FrameCount; i++ {
 				// Check for stop signal before processing the frame.
 				select {
 				case <-stop:
 					return
 				default:
+				}
+
+				frame, delay := anim.Frame(i)
+				if frame == nil {
+					continue
 				}
 
 				v.mu.Lock()
@@ -153,7 +224,7 @@ func (v *Viewer) startAnimation() {
 				select {
 				case <-stop:
 					return
-				case <-time.After(anim.Delays[i]):
+				case <-time.After(delay):
 				}
 			}
 
@@ -186,17 +257,18 @@ func (v *Viewer) stopAnimation() {
 
 // applyTransforms applies rotation and zoom to the current static image.
 func (v *Viewer) applyTransforms() {
-	if v.originalImg == nil {
-		return
-	}
-
 	v.mu.Lock()
+	origImg := v.originalImg
 	rotation := v.rotation
 	fitMode := v.fitMode
 	zoomLevel := v.zoomLevel
 	v.mu.Unlock()
 
-	displayImg := v.originalImg
+	if origImg == nil {
+		return
+	}
+
+	displayImg := origImg
 	if rotation != 0 {
 		displayImg = rotateImage(displayImg, rotation)
 	}
@@ -305,8 +377,8 @@ func (v *Viewer) Clear() {
 	v.imageCanvas.Image = nil
 	v.imageCanvas.SetMinSize(fyne.NewSize(0, 0))
 	v.imageCanvas.Refresh()
-	v.originalImg = nil
 	v.mu.Lock()
+	v.originalImg = nil
 	v.zoomLevel = 1.0
 	v.rotation = 0
 	v.fitMode = true
@@ -366,16 +438,15 @@ func rotateImage(src goimage.Image, degrees int) goimage.Image {
 }
 
 // toRGBA converts any image.Image to *image.RGBA for direct pixel access.
+// Uses draw.Draw which has optimised fast-paths for common source types
+// (YCbCr from JPEG, Paletted from GIF, NRGBA from PNG) — ~3-4× faster than
+// per-pixel Set/At.
 func toRGBA(src goimage.Image) *goimage.RGBA {
 	if rgba, ok := src.(*goimage.RGBA); ok {
 		return rgba
 	}
 	bounds := src.Bounds()
 	dst := goimage.NewRGBA(bounds)
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			dst.Set(x, y, src.At(x, y))
-		}
-	}
+	godraw.Draw(dst, bounds, src, bounds.Min, godraw.Src)
 	return dst
 }

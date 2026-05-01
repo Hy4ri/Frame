@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kettek/apng"
@@ -20,12 +21,11 @@ import (
 // reasonable floor.
 const minFrameDelay = 10 * time.Millisecond
 
-// Animation holds pre-composited frames and timing data for playback.
-type Animation struct {
-	Frames    []image.Image   // Full-size composited frames ready for display
-	Delays    []time.Duration // Per-frame display duration
-	LoopCount int             // 0 = loop forever, >0 = loop N times
-}
+// maxCachedFrames is the sliding-window size for composited frames.
+// Only this many composited frames are held in memory at once; older ones
+// are evicted and re-composited on demand. 30 frames ≈ 1 second of typical
+// GIF playback, keeping memory bounded even for very long animations.
+const maxCachedFrames = 30
 
 // animatableExtensions lists extensions that may contain animation.
 // Note: .png is intentionally excluded — static PNGs are loaded directly via
@@ -39,6 +39,59 @@ var animatableExtensions = map[string]bool{
 func IsAnimatable(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	return animatableExtensions[ext]
+}
+
+// composited holds a single composited frame and its display duration.
+type composited struct {
+	img   image.Image
+	delay time.Duration
+}
+
+// Animation holds the raw decoded data and a sliding-window cache of
+// composited frames. Frames are composited on demand instead of all up-front,
+// capping memory usage to O(maxCachedFrames) instead of O(totalFrames).
+type Animation struct {
+	// Public read-only
+	FrameCount int
+	LoopCount  int
+
+	// Source data (exactly one is non-nil)
+	rawGIF  *gif.GIF
+	rawAPNG *apng.APNG
+
+	// Canvas dimensions
+	width  int
+	height int
+
+	// Sliding-window frame cache
+	mu         sync.Mutex
+	frameCache map[int]*composited
+	cacheOrder []int // LRU order: most-recently-used at end
+}
+
+// Frame returns the composited image and delay for frame at the given index.
+// Frames are composited on demand and cached in a bounded sliding window.
+func (a *Animation) Frame(index int) (image.Image, time.Duration) {
+	if index < 0 || index >= a.FrameCount {
+		return nil, 0
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// Cache hit — touch and return.
+	if c, ok := a.frameCache[index]; ok {
+		a.touchLocked(index)
+		return c.img, c.delay
+	}
+
+	// Cache miss — composite the frame.
+	img, delay := a.compositeFrame(index)
+	a.frameCache[index] = &composited{img: img, delay: delay}
+	a.cacheOrder = append(a.cacheOrder, index)
+	a.evictLocked()
+
+	return img, delay
 }
 
 // Decode attempts to decode an animated image from the given path.
@@ -57,8 +110,8 @@ func Decode(path string) (*Animation, error) {
 	}
 }
 
-// decodeGIF decodes an animated GIF file, compositing frames according to
-// their disposal methods.
+// decodeGIF decodes an animated GIF file, storing the raw data for
+// on-demand frame compositing.
 func decodeGIF(path string) (*Animation, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -71,7 +124,7 @@ func decodeGIF(path string) (*Animation, error) {
 		return nil, err
 	}
 
-	// Single-frame GIF: not animated
+	// Single-frame GIF: not animated.
 	if len(g.Image) <= 1 {
 		return nil, nil
 	}
@@ -79,66 +132,26 @@ func decodeGIF(path string) (*Animation, error) {
 	width := g.Config.Width
 	height := g.Config.Height
 
-	// If config dimensions are zero (rare), infer from first frame
+	// If config dimensions are zero (rare), infer from first frame.
 	if width == 0 || height == 0 {
 		bounds := g.Image[0].Bounds()
 		width = bounds.Max.X
 		height = bounds.Max.Y
 	}
 
-	canvasRect := image.Rect(0, 0, width, height)
-	canvas := image.NewRGBA(canvasRect)
-	var prevCanvas *image.RGBA
-
-	anim := &Animation{
-		Frames:    make([]image.Image, 0, len(g.Image)),
-		Delays:    make([]time.Duration, 0, len(g.Image)),
-		LoopCount: g.LoopCount,
-	}
-
-	for i, frame := range g.Image {
-		// Handle disposal from the PREVIOUS frame before drawing the current one.
-		if i > 0 {
-			switch g.Disposal[i-1] {
-			case gif.DisposalBackground:
-				// Clear the previous frame's area to transparent.
-				prevBounds := g.Image[i-1].Bounds()
-				clearRect(canvas, prevBounds)
-			case gif.DisposalPrevious:
-				// Restore to the saved state.
-				if prevCanvas != nil {
-					copy(canvas.Pix, prevCanvas.Pix)
-				}
-				// DisposalNone (0) or unspecified: leave canvas as-is.
-			}
-		}
-
-		// Save canvas state before drawing if the current frame's disposal
-		// is DisposalPrevious (we need to restore after this frame).
-		if i < len(g.Disposal) && g.Disposal[i] == gif.DisposalPrevious {
-			prevCanvas = cloneRGBA(canvas)
-		}
-
-		// Draw the current frame onto the canvas.
-		draw.Draw(canvas, frame.Bounds(), frame, frame.Bounds().Min, draw.Over)
-
-		// Save composited frame.
-		composited := cloneRGBA(canvas)
-		anim.Frames = append(anim.Frames, composited)
-
-		// Convert delay: GIF delays are in 100ths of a second.
-		delay := time.Duration(g.Delay[i]) * 10 * time.Millisecond
-		if delay < minFrameDelay {
-			delay = minFrameDelay
-		}
-		anim.Delays = append(anim.Delays, delay)
-	}
-
-	return anim, nil
+	return &Animation{
+		FrameCount: len(g.Image),
+		LoopCount:  g.LoopCount,
+		rawGIF:     g,
+		width:      width,
+		height:     height,
+		frameCache: make(map[int]*composited, maxCachedFrames),
+		cacheOrder: make([]int, 0, maxCachedFrames),
+	}, nil
 }
 
-// decodeAPNG decodes an animated PNG file, compositing frames according to
-// their dispose and blend operations.
+// decodeAPNG decodes an animated PNG file, storing the raw data for
+// on-demand frame compositing.
 func decodeAPNG(path string) (*Animation, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -156,70 +169,135 @@ func decodeAPNG(path string) (*Animation, error) {
 		return nil, nil
 	}
 
-	// Determine canvas size from the first frame (default image).
 	firstBounds := a.Frames[0].Image.Bounds()
-	width := firstBounds.Dx()
-	height := firstBounds.Dy()
 
-	canvasRect := image.Rect(0, 0, width, height)
+	return &Animation{
+		FrameCount: len(a.Frames),
+		LoopCount:  int(a.LoopCount),
+		rawAPNG:    &a,
+		width:      firstBounds.Dx(),
+		height:     firstBounds.Dy(),
+		frameCache: make(map[int]*composited, maxCachedFrames),
+		cacheOrder: make([]int, 0, maxCachedFrames),
+	}, nil
+}
+
+// compositeFrame builds the composited image for a given frame index by
+// replaying all frames from 0..index. This is the expected cost of a cache
+// miss in the sliding window.
+func (a *Animation) compositeFrame(index int) (image.Image, time.Duration) {
+	if a.rawGIF != nil {
+		return a.compositeGIFFrame(index)
+	}
+	return a.compositeAPNGFrame(index)
+}
+
+// compositeGIFFrame replays GIF frames 0..index onto a canvas.
+func (a *Animation) compositeGIFFrame(index int) (image.Image, time.Duration) {
+	g := a.rawGIF
+	canvasRect := image.Rect(0, 0, a.width, a.height)
 	canvas := image.NewRGBA(canvasRect)
 	var prevCanvas *image.RGBA
 
-	anim := &Animation{
-		Frames:    make([]image.Image, 0, len(a.Frames)),
-		Delays:    make([]time.Duration, 0, len(a.Frames)),
-		LoopCount: int(a.LoopCount),
+	for i := 0; i <= index; i++ {
+		frame := g.Image[i]
+
+		// Handle disposal from the PREVIOUS frame before drawing the current one.
+		if i > 0 {
+			switch g.Disposal[i-1] {
+			case gif.DisposalBackground:
+				prevBounds := g.Image[i-1].Bounds()
+				clearRect(canvas, prevBounds)
+			case gif.DisposalPrevious:
+				if prevCanvas != nil {
+					copy(canvas.Pix, prevCanvas.Pix)
+				}
+			}
+		}
+
+		// Save canvas state if this frame's disposal is DisposalPrevious.
+		if i < len(g.Disposal) && g.Disposal[i] == gif.DisposalPrevious {
+			prevCanvas = cloneRGBA(canvas)
+		}
+
+		draw.Draw(canvas, frame.Bounds(), frame, frame.Bounds().Min, draw.Over)
 	}
 
-	for _, frame := range a.Frames {
+	delay := time.Duration(g.Delay[index]) * 10 * time.Millisecond
+	if delay < minFrameDelay {
+		delay = minFrameDelay
+	}
+
+	return cloneRGBA(canvas), delay
+}
+
+// compositeAPNGFrame replays APNG frames 0..index onto a canvas.
+func (a *Animation) compositeAPNGFrame(index int) (image.Image, time.Duration) {
+	ap := a.rawAPNG
+	canvasRect := image.Rect(0, 0, a.width, a.height)
+	canvas := image.NewRGBA(canvasRect)
+	var prevCanvas *image.RGBA
+
+	for i := 0; i <= index; i++ {
+		frame := ap.Frames[i]
+
 		// Save canvas state before drawing if dispose op is "previous".
 		if frame.DisposeOp == apng.DISPOSE_OP_PREVIOUS {
 			prevCanvas = cloneRGBA(canvas)
 		}
 
-		// Calculate the frame's target rectangle on the canvas.
 		frameRect := image.Rect(
 			frame.XOffset, frame.YOffset,
 			frame.XOffset+frame.Image.Bounds().Dx(),
 			frame.YOffset+frame.Image.Bounds().Dy(),
 		)
 
-		// Apply blend operation.
 		switch frame.BlendOp {
 		case apng.BLEND_OP_SOURCE:
-			// Replace the region entirely.
 			draw.Draw(canvas, frameRect, frame.Image, frame.Image.Bounds().Min, draw.Src)
 		default:
-			// BLEND_OP_OVER: alpha-composite over existing content.
 			draw.Draw(canvas, frameRect, frame.Image, frame.Image.Bounds().Min, draw.Over)
 		}
 
-		// Save composited frame.
-		composited := cloneRGBA(canvas)
-		anim.Frames = append(anim.Frames, composited)
-
-		// Get frame delay.
-		delay := time.Duration(float64(time.Second) * frame.GetDelay())
-		if delay < minFrameDelay {
-			delay = minFrameDelay
-		}
-		anim.Delays = append(anim.Delays, delay)
-
-		// Handle disposal for the CURRENT frame (affects what the next frame sees).
+		// Handle disposal for the current frame.
 		switch frame.DisposeOp {
 		case apng.DISPOSE_OP_BACKGROUND:
-			// Clear the frame's area to transparent.
 			clearRect(canvas, frameRect)
 		case apng.DISPOSE_OP_PREVIOUS:
-			// Restore to saved state.
 			if prevCanvas != nil {
 				copy(canvas.Pix, prevCanvas.Pix)
 			}
-			// DISPOSE_OP_NONE: leave canvas as-is.
 		}
 	}
 
-	return anim, nil
+	delay := time.Duration(float64(time.Second) * ap.Frames[index].GetDelay())
+	if delay < minFrameDelay {
+		delay = minFrameDelay
+	}
+
+	return cloneRGBA(canvas), delay
+}
+
+// touchLocked moves index to the end (most-recently-used) of the order slice.
+// Caller must hold a.mu.
+func (a *Animation) touchLocked(index int) {
+	for i, idx := range a.cacheOrder {
+		if idx == index {
+			a.cacheOrder = append(a.cacheOrder[:i], a.cacheOrder[i+1:]...)
+			break
+		}
+	}
+	a.cacheOrder = append(a.cacheOrder, index)
+}
+
+// evictLocked removes the least-recently-used entries if the cache exceeds
+// maxCachedFrames. Caller must hold a.mu.
+func (a *Animation) evictLocked() {
+	for len(a.cacheOrder) > maxCachedFrames {
+		evict := a.cacheOrder[0]
+		a.cacheOrder = a.cacheOrder[1:]
+		delete(a.frameCache, evict)
+	}
 }
 
 // cloneRGBA creates a deep copy of an RGBA image.

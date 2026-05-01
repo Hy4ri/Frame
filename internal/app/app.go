@@ -108,6 +108,21 @@ func (a *App) DisplayImage(index int) {
 	}
 	a.currentIndex = index
 	a.window.LoadImage(a.images[index])
+
+	// Prefetch adjacent images in the background so h/l navigation is instant.
+	a.prefetchAround(index)
+}
+
+// prefetchAround warms the image cache for images near the current index.
+func (a *App) prefetchAround(center int) {
+	offsets := []int{1, 2, 3, -1, -2}
+	for _, offset := range offsets {
+		idx := center + offset
+		if idx >= 0 && idx < len(a.images) {
+			path := a.images[idx]
+			go a.window.PrefetchImage(path)
+		}
+	}
 }
 
 // NextImage displays the next image in the list.
@@ -152,6 +167,7 @@ func (a *App) DeleteCurrent() {
 			return
 		}
 
+		a.window.InvalidateCache(currentPath)
 		a.images = append(a.images[:a.currentIndex], a.images[a.currentIndex+1:]...)
 
 		if len(a.images) == 0 {
@@ -191,6 +207,7 @@ func (a *App) RenameCurrent() {
 			return
 		}
 
+		a.window.InvalidateCache(currentPath)
 		a.images[a.currentIndex] = newPath
 		a.window.UpdateTitle(newPath)
 	})

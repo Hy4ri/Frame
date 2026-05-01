@@ -197,6 +197,16 @@ func (w *Window) LoadImage(path string) {
 	w.UpdateTitle(path)
 }
 
+// PrefetchImage decodes an image into the viewer's cache without displaying it.
+func (w *Window) PrefetchImage(path string) {
+	w.viewer.PrefetchImage(path)
+}
+
+// InvalidateCache removes a path from the image cache (e.g. after delete/rename).
+func (w *Window) InvalidateCache(path string) {
+	w.viewer.cache.Invalidate(path)
+}
+
 // UpdateTitle updates the window title with the current image info.
 func (w *Window) UpdateTitle(path string) {
 	name := filepath.Base(path)

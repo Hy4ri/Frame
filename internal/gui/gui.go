@@ -92,6 +92,14 @@ func (w *Window) handleSpecialKey(event *fyne.KeyEvent) {
 	case fyne.KeyUp:
 		w.app.PrevImage()
 
+	// Zoom — some keyboard layouts send these as special keys
+	case fyne.KeyMinus:
+		w.app.ZoomOut()
+	case fyne.KeyPlus:
+		w.app.ZoomIn()
+	case fyne.KeyEqual:
+		w.app.ZoomIn()
+
 	// Rename
 	case fyne.KeyF2:
 		w.app.RenameCurrent()

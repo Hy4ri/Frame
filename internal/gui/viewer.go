@@ -10,12 +10,43 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/widget"
 
 	"github.com/Hy4ri/frame/internal/animation"
 )
 
+// zoomScrollContainer wraps a scroll container and intercepts mouse wheel
+// events to perform zoom instead of scrolling. This lets the user zoom with
+// the scroll wheel while still supporting drag-to-pan via the inner Scroll.
+type zoomScrollContainer struct {
+	widget.BaseWidget
+	scroll *container.Scroll
+	viewer *Viewer
+}
+
+func newZoomScrollContainer(scroll *container.Scroll, viewer *Viewer) *zoomScrollContainer {
+	z := &zoomScrollContainer{scroll: scroll, viewer: viewer}
+	z.ExtendBaseWidget(z)
+	return z
+}
+
+// Scrolled intercepts mouse wheel events and delegates to zoom.
+func (z *zoomScrollContainer) Scrolled(ev *fyne.ScrollEvent) {
+	if ev.Scrolled.DY > 0 {
+		z.viewer.ZoomIn()
+	} else if ev.Scrolled.DY < 0 {
+		z.viewer.ZoomOut()
+	}
+}
+
+// CreateRenderer returns a renderer that simply wraps the inner scroll.
+func (z *zoomScrollContainer) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(z.scroll)
+}
+
 // Viewer handles image display with zoom, rotation, and animation support.
 type Viewer struct {
+	outerWidget *zoomScrollContainer
 	scroll      *container.Scroll
 	imageCanvas *canvas.Image
 	cache       *imageCache
@@ -33,6 +64,15 @@ type Viewer struct {
 	rotation    int // 0, 90, 180, 270 degrees
 	fitMode     bool
 
+	// Cached rotated image to avoid re-rotating on every zoom step.
+	cachedRotatedImg goimage.Image
+	cachedRotation   int
+	cachedOrigPtr    goimage.Image // identity check for cache invalidation
+
+	// zoomTimer coalesces rapid zoom events (e.g. scroll wheel) into a
+	// single applyTransforms call, avoiding redundant work.
+	zoomTimer *time.Timer
+
 	// Animation state (also protected by mu)
 	anim       *animation.Animation
 	animStop   chan struct{} // closed to signal the playback goroutine to exit
@@ -43,10 +83,11 @@ type Viewer struct {
 // NewViewer creates a new image viewer widget.
 func NewViewer() *Viewer {
 	v := &Viewer{
-		zoomLevel: 1.0,
-		rotation:  0,
-		fitMode:   true,
-		cache:     newImageCache(defaultCacheCapacity),
+		zoomLevel:      1.0,
+		rotation:       0,
+		fitMode:        true,
+		cache:          newImageCache(defaultCacheCapacity),
+		cachedRotation: -1, // force first computation
 	}
 
 	v.imageCanvas = canvas.NewImageFromImage(nil)
@@ -54,13 +95,14 @@ func NewViewer() *Viewer {
 	v.imageCanvas.ScaleMode = canvas.ImageScaleSmooth
 
 	v.scroll = container.NewScroll(v.imageCanvas)
+	v.outerWidget = newZoomScrollContainer(v.scroll, v)
 
 	return v
 }
 
-// Widget returns the scroll container that holds the image.
+// Widget returns the zoomable container that wraps the scroll view.
 func (v *Viewer) Widget() fyne.CanvasObject {
-	return v.scroll
+	return v.outerWidget
 }
 
 // LoadImage loads and displays an image from the given path.
@@ -76,6 +118,7 @@ func (v *Viewer) LoadImage(path string) {
 	v.rotation = 0
 	v.zoomLevel = 1.0
 	v.fitMode = true
+	v.invalidateRotationCacheLocked()
 	v.mu.Unlock()
 
 	// Animated images are never cached (they have their own frame buffer).
@@ -108,6 +151,7 @@ func (v *Viewer) LoadImage(path string) {
 	if img, ok := v.cache.Get(path); ok {
 		v.mu.Lock()
 		v.originalImg = img
+		v.invalidateRotationCacheLocked()
 		v.mu.Unlock()
 		v.applyTransforms()
 		return
@@ -138,6 +182,7 @@ func (v *Viewer) decodeAndCommitStatic(path string, gen uint64) {
 
 	v.mu.Lock()
 	v.originalImg = img
+	v.invalidateRotationCacheLocked()
 	v.mu.Unlock()
 	v.applyTransforms()
 }
@@ -255,7 +300,49 @@ func (v *Viewer) stopAnimation() {
 	}
 }
 
+// invalidateRotationCacheLocked clears the cached rotated image.
+// Caller must hold v.mu.
+func (v *Viewer) invalidateRotationCacheLocked() {
+	v.cachedRotatedImg = nil
+	v.cachedOrigPtr = nil
+	v.cachedRotation = -1
+}
+
+// getRotatedImage returns the rotated version of the original image, using
+// a cache to avoid expensive re-rotation when only zoom changes.
+// Caller must hold v.mu when reading origImg/rotation, but this method
+// does NOT hold the lock during the (potentially slow) rotation itself.
+func (v *Viewer) getRotatedImage(origImg goimage.Image, rotation int) goimage.Image {
+	// Fast path: no rotation needed.
+	if rotation == 0 {
+		return origImg
+	}
+
+	// Check if we already have the rotated version cached.
+	v.mu.Lock()
+	if v.cachedOrigPtr == origImg && v.cachedRotation == rotation && v.cachedRotatedImg != nil {
+		cached := v.cachedRotatedImg
+		v.mu.Unlock()
+		return cached
+	}
+	v.mu.Unlock()
+
+	// Rotate (expensive) without holding the lock.
+	rotated := rotateImage(origImg, rotation)
+
+	// Store in cache.
+	v.mu.Lock()
+	v.cachedOrigPtr = origImg
+	v.cachedRotation = rotation
+	v.cachedRotatedImg = rotated
+	v.mu.Unlock()
+
+	return rotated
+}
+
 // applyTransforms applies rotation and zoom to the current static image.
+// Rotation results are cached so that rapid zoom changes (e.g. scroll wheel)
+// skip the expensive rotation step.
 func (v *Viewer) applyTransforms() {
 	v.mu.Lock()
 	origImg := v.originalImg
@@ -268,10 +355,7 @@ func (v *Viewer) applyTransforms() {
 		return
 	}
 
-	displayImg := origImg
-	if rotation != 0 {
-		displayImg = rotateImage(displayImg, rotation)
-	}
+	displayImg := v.getRotatedImage(origImg, rotation)
 
 	v.imageCanvas.Image = displayImg
 
@@ -287,6 +371,24 @@ func (v *Viewer) applyTransforms() {
 	}
 
 	v.imageCanvas.Refresh()
+}
+
+// scheduleApplyTransforms debounces rapid zoom changes (e.g. from scroll
+// wheel) so that applyTransforms runs at most once per 16ms (~60fps).
+func (v *Viewer) scheduleApplyTransforms() {
+	v.mu.Lock()
+	isAnimated := v.isAnimated
+	if v.zoomTimer != nil {
+		v.zoomTimer.Stop()
+	}
+	v.zoomTimer = time.AfterFunc(16*time.Millisecond, func() {
+		v.applyTransforms()
+	})
+	v.mu.Unlock()
+
+	// For animated images, the playback goroutine picks up new values
+	// on the next frame, so we don't need to do anything extra.
+	_ = isAnimated
 }
 
 // Rotate rotates the image by 90 degrees.
@@ -311,38 +413,73 @@ func (v *Viewer) Rotate(clockwise bool) {
 func (v *Viewer) ZoomIn() {
 	v.mu.Lock()
 	if v.fitMode {
-		v.zoomLevel = 1.0
+		v.zoomLevel = v.computeFitZoomLocked()
 		v.fitMode = false
 	}
 	v.zoomLevel *= 1.1
 	if v.zoomLevel > 10.0 {
 		v.zoomLevel = 10.0
 	}
-	isAnimated := v.isAnimated
 	v.mu.Unlock()
 
-	if !isAnimated {
-		v.applyTransforms()
-	}
+	v.scheduleApplyTransforms()
 }
 
 // ZoomOut decreases zoom by 10%.
 func (v *Viewer) ZoomOut() {
 	v.mu.Lock()
 	if v.fitMode {
-		v.zoomLevel = 1.0
+		v.zoomLevel = v.computeFitZoomLocked()
 		v.fitMode = false
 	}
 	v.zoomLevel /= 1.1
 	if v.zoomLevel < 0.1 {
 		v.zoomLevel = 0.1
 	}
-	isAnimated := v.isAnimated
 	v.mu.Unlock()
 
-	if !isAnimated {
-		v.applyTransforms()
+	v.scheduleApplyTransforms()
+}
+
+// computeFitZoomLocked estimates the zoom level that corresponds to the
+// current fit-to-window view, so that switching from fit mode to manual
+// zoom starts at the perceived scale. Caller must hold v.mu.
+func (v *Viewer) computeFitZoomLocked() float64 {
+	if v.originalImg == nil {
+		return 1.0
 	}
+	img := v.originalImg
+	if v.rotation == 90 || v.rotation == 270 {
+		// Dimensions swap when rotated
+		bounds := img.Bounds()
+		imgW := float64(bounds.Dy())
+		imgH := float64(bounds.Dx())
+		viewW := float64(v.scroll.Size().Width)
+		viewH := float64(v.scroll.Size().Height)
+		if imgW == 0 || imgH == 0 {
+			return 1.0
+		}
+		scaleW := viewW / imgW
+		scaleH := viewH / imgH
+		if scaleW < scaleH {
+			return scaleW
+		}
+		return scaleH
+	}
+	bounds := img.Bounds()
+	imgW := float64(bounds.Dx())
+	imgH := float64(bounds.Dy())
+	viewW := float64(v.scroll.Size().Width)
+	viewH := float64(v.scroll.Size().Height)
+	if imgW == 0 || imgH == 0 {
+		return 1.0
+	}
+	scaleW := viewW / imgW
+	scaleH := viewH / imgH
+	if scaleW < scaleH {
+		return scaleW
+	}
+	return scaleH
 }
 
 // ZoomFit fits the image to the window.
@@ -382,6 +519,7 @@ func (v *Viewer) Clear() {
 	v.zoomLevel = 1.0
 	v.rotation = 0
 	v.fitMode = true
+	v.invalidateRotationCacheLocked()
 	v.mu.Unlock()
 }
 

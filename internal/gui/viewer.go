@@ -126,6 +126,16 @@ func (v *Viewer) Widget() fyne.CanvasObject {
 func (v *Viewer) LoadImage(path string) {
 	gen := atomic.AddUint64(&v.loadGen, 1)
 
+	// Cancel any pending zoom debounce before changing state.
+	v.mu.Lock()
+	if v.zoomTimer != nil {
+		if !v.zoomTimer.Stop() {
+			<-v.zoomTimer.C
+		}
+		v.zoomTimer = nil
+	}
+	v.mu.Unlock()
+
 	v.stopAnimation()
 
 	v.mu.Lock()
@@ -264,6 +274,7 @@ func (v *Viewer) startAnimation() {
 					displayImg = rotateImage(displayImg, rotation)
 				}
 
+				v.mu.Lock()
 				v.imageCanvas.Image = displayImg
 
 				if fitMode {
@@ -278,6 +289,7 @@ func (v *Viewer) startAnimation() {
 				}
 
 				v.imageCanvas.Refresh()
+				v.mu.Unlock()
 
 				// Wait for the frame delay, but remain responsive to stop.
 				select {
@@ -389,20 +401,19 @@ func (v *Viewer) applyTransforms() {
 
 // scheduleApplyTransforms debounces rapid zoom changes (e.g. from scroll
 // wheel) so that applyTransforms runs at most once per 16ms (~60fps).
+// Callers should check isAnimated first — animated playback picks up new
+// values on the next frame boundary and the timer is unnecessary.
 func (v *Viewer) scheduleApplyTransforms() {
 	v.mu.Lock()
-	isAnimated := v.isAnimated
 	if v.zoomTimer != nil {
-		v.zoomTimer.Stop()
+		if !v.zoomTimer.Stop() {
+			<-v.zoomTimer.C
+		}
 	}
 	v.zoomTimer = time.AfterFunc(16*time.Millisecond, func() {
 		v.applyTransforms()
 	})
 	v.mu.Unlock()
-
-	// For animated images, the playback goroutine picks up new values
-	// on the next frame, so we don't need to do anything extra.
-	_ = isAnimated
 }
 
 // Rotate rotates the image by 90 degrees.
@@ -434,9 +445,12 @@ func (v *Viewer) ZoomIn() {
 	if v.zoomLevel > 10.0 {
 		v.zoomLevel = 10.0
 	}
+	isAnimated := v.isAnimated
 	v.mu.Unlock()
 
-	v.scheduleApplyTransforms()
+	if !isAnimated {
+		v.scheduleApplyTransforms()
+	}
 }
 
 // ZoomOut decreases zoom by 10%.
@@ -450,9 +464,12 @@ func (v *Viewer) ZoomOut() {
 	if v.zoomLevel < 0.1 {
 		v.zoomLevel = 0.1
 	}
+	isAnimated := v.isAnimated
 	v.mu.Unlock()
 
-	v.scheduleApplyTransforms()
+	if !isAnimated {
+		v.scheduleApplyTransforms()
+	}
 }
 
 // computeFitZoomLocked estimates the zoom level that corresponds to the
@@ -463,31 +480,26 @@ func (v *Viewer) computeFitZoomLocked() float64 {
 		return 1.0
 	}
 	img := v.originalImg
-	if v.rotation == 90 || v.rotation == 270 {
-		// Dimensions swap when rotated
-		bounds := img.Bounds()
-		imgW := float64(bounds.Dy())
-		imgH := float64(bounds.Dx())
-		viewW := float64(v.scroll.Size().Width)
-		viewH := float64(v.scroll.Size().Height)
-		if imgW == 0 || imgH == 0 {
-			return 1.0
-		}
-		scaleW := viewW / imgW
-		scaleH := viewH / imgH
-		if scaleW < scaleH {
-			return scaleW
-		}
-		return scaleH
-	}
 	bounds := img.Bounds()
 	imgW := float64(bounds.Dx())
 	imgH := float64(bounds.Dy())
-	viewW := float64(v.scroll.Size().Width)
-	viewH := float64(v.scroll.Size().Height)
+
+	if v.rotation == 90 || v.rotation == 270 {
+		// Dimensions swap when rotated
+		imgW, imgH = imgH, imgW
+	}
+
 	if imgW == 0 || imgH == 0 {
 		return 1.0
 	}
+
+	viewW := float64(v.scroll.Size().Width)
+	viewH := float64(v.scroll.Size().Height)
+
+	if viewW == 0 || viewH == 0 {
+		return 1.0
+	}
+
 	scaleW := viewW / imgW
 	scaleH := viewH / imgH
 	if scaleW < scaleH {
@@ -537,6 +549,11 @@ func (v *Viewer) Clear() {
 	v.mu.Unlock()
 }
 
+// maxImageDimension caps the width/height we will attempt to rotate or
+// convert to RGBA. This prevents OOM from decompression bombs or corrupt
+// headers. 16384 px per side × 4 bytes × 16384 ≈ 1 GiB worst case.
+const maxImageDimension = 16384
+
 // rotateImage rotates a Go image by the specified degrees (90, 180, 270).
 // Uses direct RGBA buffer manipulation for performance.
 func rotateImage(src goimage.Image, degrees int) goimage.Image {
@@ -544,6 +561,10 @@ func rotateImage(src goimage.Image, degrees int) goimage.Image {
 	bounds := rgba.Bounds()
 	w := bounds.Dx()
 	h := bounds.Dy()
+
+	if w > maxImageDimension || h > maxImageDimension {
+		return src
+	}
 	srcStride := rgba.Stride
 	srcPix := rgba.Pix
 
@@ -598,6 +619,11 @@ func toRGBA(src goimage.Image) *goimage.RGBA {
 		return rgba
 	}
 	bounds := src.Bounds()
+	w := bounds.Dx()
+	h := bounds.Dy()
+	if w > maxImageDimension || h > maxImageDimension {
+		return goimage.NewRGBA(goimage.Rect(0, 0, 1, 1))
+	}
 	dst := goimage.NewRGBA(bounds)
 	godraw.Draw(dst, bounds, src, bounds.Min, godraw.Src)
 	return dst

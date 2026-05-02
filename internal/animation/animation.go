@@ -3,8 +3,8 @@
 package animation
 
 import (
+	"fmt"
 	"image"
-	"image/color"
 	"image/draw"
 	"image/gif"
 	"os"
@@ -115,13 +115,13 @@ func Decode(path string) (*Animation, error) {
 func decodeGIF(path string) (*Animation, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open gif: %w", err)
 	}
 	defer f.Close()
 
 	g, err := gif.DecodeAll(f)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode gif: %w", err)
 	}
 
 	// Single-frame GIF: not animated.
@@ -155,13 +155,13 @@ func decodeGIF(path string) (*Animation, error) {
 func decodeAPNG(path string) (*Animation, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open apng: %w", err)
 	}
 	defer f.Close()
 
 	a, err := apng.DecodeAll(f)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode apng: %w", err)
 	}
 
 	// Single-frame PNG: not animated.
@@ -309,10 +309,5 @@ func cloneRGBA(src *image.RGBA) *image.RGBA {
 
 // clearRect fills a rectangle in the canvas with transparent pixels.
 func clearRect(canvas *image.RGBA, rect image.Rectangle) {
-	transparent := color.RGBA{0, 0, 0, 0}
-	for y := rect.Min.Y; y < rect.Max.Y; y++ {
-		for x := rect.Min.X; x < rect.Max.X; x++ {
-			canvas.SetRGBA(x, y, transparent)
-		}
-	}
+	draw.Draw(canvas, rect, image.Transparent, image.Point{}, draw.Src)
 }

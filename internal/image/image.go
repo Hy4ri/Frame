@@ -18,14 +18,28 @@ import (
 	_ "golang.org/x/image/webp"
 )
 
-// MoveToTrash moves a file to the system trash using gio.
+// MoveToTrash moves a file to the system trash using gio (GNOME) or fallback methods.
+// Returns an error if no trash method is available.
 func MoveToTrash(path string) error {
+	// Try gio (GNOME) first
 	cmd := exec.Command("gio", "trash", path)
-	if err := cmd.Run(); err != nil {
-		// Fallback: delete directly if gio is not available
-		return os.Remove(path)
+	if err := cmd.Run(); err == nil {
+		return nil
 	}
-	return nil
+
+	// Fallback to trash-cli
+	cmd = exec.Command("trash", path)
+	if err := cmd.Run(); err == nil {
+		return nil
+	}
+
+	// Fallback to freedesktop.org compliant trash (e.g., trash-cli, gvfs-trash)
+	cmd = exec.Command("trash-put", path)
+	if err := cmd.Run(); err == nil {
+		return nil
+	}
+
+	return fmt.Errorf("move to trash failed: no suitable trash command found (tried gio, trash, trash-put)")
 }
 
 // Rename renames a file to a new name in the same directory.
@@ -141,11 +155,12 @@ func getFormatFromExt(ext string) string {
 }
 
 // getExifData attempts to extract basic EXIF data using exiftool.
+// Returns empty string if exiftool is not available or extraction fails.
 func getExifData(path string) string {
 	cmd := exec.Command("exiftool", "-s", "-Make", "-Model", "-DateTimeOriginal", "-ExposureTime", "-FNumber", "-ISO", path)
 	output, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
-	return string(output)
+	return strings.TrimSpace(string(output))
 }

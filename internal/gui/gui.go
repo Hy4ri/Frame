@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -53,6 +54,7 @@ type Window struct {
 	app          AppController
 	isFullscreen bool
 	gSequence    bool
+	gTimer       *time.Timer
 }
 
 // NewWindow creates and configures the main application window.
@@ -84,6 +86,13 @@ func NewWindow(appCtrl AppController) *Window {
 	// Reset sticky state when the app loses focus (e.g. alt-tab).
 	w.fyneApp.Lifecycle().SetOnExitedForeground(func() {
 		w.gSequence = false
+		if w.gTimer != nil {
+			w.gTimer.Stop()
+			if w.gTimer.Reset(time.Second) {
+				<-w.gTimer.C
+			}
+			w.gTimer = nil
+		}
 		w.viewer.SetCtrlHeld(false)
 	})
 
@@ -152,8 +161,22 @@ func (w *Window) handleCharKey(r rune) {
 		if w.gSequence {
 			w.app.FirstImage()
 			w.gSequence = false
+			if w.gTimer != nil {
+				if !w.gTimer.Stop() {
+					<-w.gTimer.C
+				}
+				w.gTimer = nil
+			}
 		} else {
 			w.gSequence = true
+			if w.gTimer != nil {
+				if !w.gTimer.Stop() {
+					<-w.gTimer.C
+				}
+			}
+			w.gTimer = time.AfterFunc(500*time.Millisecond, func() {
+				w.gSequence = false
+			})
 		}
 		return // Don't reset gSequence below
 	case 'G':
@@ -197,12 +220,24 @@ func (w *Window) handleCharKey(r rune) {
 
 	default:
 		w.gSequence = false
+		if w.gTimer != nil {
+			if !w.gTimer.Stop() {
+				<-w.gTimer.C
+			}
+			w.gTimer = nil
+		}
 		return
 	}
 
 	// Reset g sequence on any non-g key
 	if r != 'g' {
 		w.gSequence = false
+		if w.gTimer != nil {
+			if !w.gTimer.Stop() {
+				<-w.gTimer.C
+			}
+			w.gTimer = nil
+		}
 	}
 }
 
@@ -315,8 +350,13 @@ func (w *Window) ShowRenameDialog(path string, callback func(string)) {
 
 	d := dialog.NewForm("Rename Image", "Rename", "Cancel", items, func(confirmed bool) {
 		if confirmed {
-			newName := strings.TrimSpace(entry.Text) + ext
-			callback(newName)
+			newName := strings.TrimSpace(entry.Text)
+			// Strip any trailing extension the user may have typed so
+			// "image.jpg" doesn't become "image.jpg.jpg".
+			if e := filepath.Ext(newName); e != "" {
+				newName = strings.TrimSuffix(newName, e)
+			}
+			callback(newName + ext)
 		} else {
 			callback("")
 		}

@@ -14,7 +14,7 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
-	"fyne.io/fyne/v2/driver/desktop"
+
 	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
@@ -78,39 +78,17 @@ func NewWindow(appCtrl AppController) *Window {
 	// Set up keybindings: TypedKey for special keys, TypedRune for characters
 	w.fyneWindow.Canvas().SetOnTypedKey(w.handleSpecialKey)
 	w.fyneWindow.Canvas().SetOnTypedRune(w.handleCharKey)
-	if dc, ok := w.fyneWindow.Canvas().(desktop.Canvas); ok {
-		dc.SetOnKeyDown(w.handleKeyDown)
-		dc.SetOnKeyUp(w.handleKeyUp)
-	}
 
 	// Reset sticky state when the app loses focus (e.g. alt-tab).
 	w.fyneApp.Lifecycle().SetOnExitedForeground(func() {
 		w.gSequence = false
 		if w.gTimer != nil {
 			w.gTimer.Stop()
-			if w.gTimer.Reset(time.Second) {
-				<-w.gTimer.C
-			}
 			w.gTimer = nil
 		}
-		w.viewer.SetCtrlHeld(false)
 	})
 
 	return w
-}
-
-func (w *Window) handleKeyDown(event *fyne.KeyEvent) {
-	switch event.Name {
-	case desktop.KeyControlLeft, desktop.KeyControlRight:
-		w.viewer.SetCtrlHeld(true)
-	}
-}
-
-func (w *Window) handleKeyUp(event *fyne.KeyEvent) {
-	switch event.Name {
-	case desktop.KeyControlLeft, desktop.KeyControlRight:
-		w.viewer.SetCtrlHeld(false)
-	}
 }
 
 // handleSpecialKey handles non-character keys (arrows, Escape, F-keys, Delete).
@@ -162,20 +140,17 @@ func (w *Window) handleCharKey(r rune) {
 			w.app.FirstImage()
 			w.gSequence = false
 			if w.gTimer != nil {
-				if !w.gTimer.Stop() {
-					<-w.gTimer.C
-				}
+				w.gTimer.Stop()
 				w.gTimer = nil
 			}
 		} else {
 			w.gSequence = true
 			if w.gTimer != nil {
-				if !w.gTimer.Stop() {
-					<-w.gTimer.C
-				}
+				w.gTimer.Stop()
 			}
 			w.gTimer = time.AfterFunc(500*time.Millisecond, func() {
 				w.gSequence = false
+				w.gTimer = nil
 			})
 		}
 		return // Don't reset gSequence below
@@ -190,6 +165,10 @@ func (w *Window) handleCharKey(r rune) {
 	case '+', '=':
 		w.app.ZoomIn()
 	case '-':
+		w.app.ZoomOut()
+	case 'z':
+		w.app.ZoomIn()
+	case 'x':
 		w.app.ZoomOut()
 	case '0':
 		w.app.ZoomFit()
@@ -221,9 +200,7 @@ func (w *Window) handleCharKey(r rune) {
 	default:
 		w.gSequence = false
 		if w.gTimer != nil {
-			if !w.gTimer.Stop() {
-				<-w.gTimer.C
-			}
+			w.gTimer.Stop()
 			w.gTimer = nil
 		}
 		return
@@ -233,9 +210,7 @@ func (w *Window) handleCharKey(r rune) {
 	if r != 'g' {
 		w.gSequence = false
 		if w.gTimer != nil {
-			if !w.gTimer.Stop() {
-				<-w.gTimer.C
-			}
+			w.gTimer.Stop()
 			w.gTimer = nil
 		}
 	}

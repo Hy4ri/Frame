@@ -3,162 +3,180 @@ package gui
 import (
 	goimage "image"
 	godraw "image/draw"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
-	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/Hy4ri/frame/internal/animation"
 )
 
-// zoomScrollContainer wraps a scroll container and intercepts mouse wheel
-// events to perform zoom instead of scrolling. This lets the user zoom with
-// the scroll wheel while still supporting drag-to-pan via the inner Scroll.
-type zoomScrollContainer struct {
-	widget.BaseWidget
-	scroll *container.Scroll
-	viewer *Viewer
-}
-
-func newZoomScrollContainer(scroll *container.Scroll, viewer *Viewer) *zoomScrollContainer {
-	z := &zoomScrollContainer{scroll: scroll, viewer: viewer}
-	z.ExtendBaseWidget(z)
-	return z
-}
-
-// Scrolled intercepts mouse wheel events and delegates to zoom.
-func (z *zoomScrollContainer) Scrolled(ev *fyne.ScrollEvent) {
-	if !z.viewer.ctrlHeld.Load() {
-		z.scroll.Scrolled(ev)
-		return
-	}
-
-	if ev.Scrolled.DY > 0 {
-		z.viewer.ZoomOut()
-	} else if ev.Scrolled.DY < 0 {
-		z.viewer.ZoomIn()
-	}
-}
-
-// CreateRenderer returns a renderer that simply wraps the inner scroll.
-func (z *zoomScrollContainer) CreateRenderer() fyne.WidgetRenderer {
-	return widget.NewSimpleRenderer(z.scroll)
-}
-
-// Viewer handles image display with zoom, rotation, and animation support.
 type Viewer struct {
-	outerWidget *zoomScrollContainer
-	scroll      *container.Scroll
+	widget.BaseWidget
 	imageCanvas *canvas.Image
 	cache       *imageCache
 
-	// loadGen is atomically incremented on each LoadImage call.
-	// Background decode goroutines check this before committing their
-	// result, so stale loads from rapid navigation are silently discarded.
 	loadGen uint64
 
-	// mu protects all fields below it, as they are read by the animation
-	// goroutine and written by UI-thread methods.
 	mu          sync.Mutex
 	originalImg goimage.Image
-	zoomLevel   float64
-	rotation    int // 0, 90, 180, 270 degrees
-	fitMode     bool
+	scale       float32
+	offsetX     float32
+	offsetY     float32
+	mouseX      float32
+	mouseY      float32
+	rotation    int
+	viewportW   float32
+	viewportH   float32
+	needsFit    bool
 
-	// Cached rotated image to avoid re-rotating on every zoom step.
+	anim       *animation.Animation
+	animStop   chan struct{}
+	animDone   chan struct{}
+	isAnimated bool
+
 	cachedRotatedImg goimage.Image
 	cachedRotation   int
-	cachedOrigPtr    goimage.Image // identity check for cache invalidation
-
-	// zoomTimer coalesces rapid zoom events (e.g. scroll wheel) into a
-	// single applyTransforms call, avoiding redundant work.
-	zoomTimer *time.Timer
-
-	// ctrlHeld is set by the window key handlers so scroll only zooms while
-	// the user is holding Ctrl.
-	ctrlHeld atomic.Bool
-
-	// Animation state (also protected by mu)
-	anim       *animation.Animation
-	animStop   chan struct{} // closed to signal the playback goroutine to exit
-	animDone   chan struct{} // closed by the goroutine when it exits
-	isAnimated bool
+	cachedOrigPtr    goimage.Image
 }
 
-// NewViewer creates a new image viewer widget.
 func NewViewer() *Viewer {
 	v := &Viewer{
-		zoomLevel:      1.0,
+		scale:          1.0,
 		rotation:       0,
-		fitMode:        true,
 		cache:          newImageCache(defaultCacheCapacity),
-		cachedRotation: -1, // force first computation
+		cachedRotation: -1,
 	}
+	v.ExtendBaseWidget(v)
 
 	v.imageCanvas = canvas.NewImageFromImage(nil)
-	v.imageCanvas.FillMode = canvas.ImageFillContain
+	v.imageCanvas.FillMode = canvas.ImageFillStretch
 	v.imageCanvas.ScaleMode = canvas.ImageScaleSmooth
-
-	v.scroll = container.NewScroll(v.imageCanvas)
-	v.outerWidget = newZoomScrollContainer(v.scroll, v)
 
 	return v
 }
 
-// SetCtrlHeld updates whether Ctrl is currently pressed.
-func (v *Viewer) SetCtrlHeld(held bool) {
-	v.ctrlHeld.Store(held)
-}
-
-// Widget returns the zoomable container that wraps the scroll view.
 func (v *Viewer) Widget() fyne.CanvasObject {
-	return v.outerWidget
+	return v
 }
 
-// LoadImage loads and displays an image from the given path.
-// If the image is animated (multi-frame GIF or APNG), it starts playback.
-// For static images, a cache hit displays instantly; a cache miss triggers
-// an async decode guarded by a generation counter.
+func (v *Viewer) CreateRenderer() fyne.WidgetRenderer {
+	return &viewerRenderer{viewer: v}
+}
+
+type viewerRenderer struct {
+	viewer *Viewer
+}
+
+func (r *viewerRenderer) Layout(size fyne.Size) {
+	v := r.viewer
+	v.viewportW = float32(size.Width)
+	v.viewportH = float32(size.Height)
+
+	if v.needsFit {
+		v.needsFit = false
+		v.fitToViewport()
+	}
+
+	v.positionImage()
+}
+
+func (r *viewerRenderer) MinSize() fyne.Size {
+	return fyne.NewSize(100, 100)
+}
+
+func (r *viewerRenderer) Refresh() {
+	v := r.viewer
+	v.positionImage()
+	canvas.Refresh(v.imageCanvas)
+}
+
+func (r *viewerRenderer) Objects() []fyne.CanvasObject {
+	return []fyne.CanvasObject{r.viewer.imageCanvas}
+}
+
+func (r *viewerRenderer) Destroy() {}
+
+func (v *Viewer) positionImage() {
+	if v.imageCanvas.Image == nil {
+		return
+	}
+	bounds := v.imageCanvas.Image.Bounds()
+	w := float32(bounds.Dx()) * v.scale
+	h := float32(bounds.Dy()) * v.scale
+	v.imageCanvas.Resize(fyne.NewSize(w, h))
+	v.imageCanvas.Move(fyne.NewPos(v.offsetX, v.offsetY))
+}
+
+func (v *Viewer) MouseMoved(event *desktop.MouseEvent) {
+	v.mouseX = event.Position.X
+	v.mouseY = event.Position.Y
+}
+
+func (v *Viewer) MouseIn(*desktop.MouseEvent) {}
+func (v *Viewer) MouseOut()                   {}
+
+func (v *Viewer) Scrolled(ev *fyne.ScrollEvent) {
+	factor := float32(1.0) + float32(ev.Scrolled.DY)*0.01
+	if factor < 0.5 {
+		factor = 0.5
+	}
+	if factor > 2.0 {
+		factor = 2.0
+	}
+
+	newScale := v.scale * factor
+	if newScale < 0.1 {
+		newScale = 0.1
+	}
+	if newScale > 10.0 {
+		newScale = 10.0
+	}
+
+	imgX := (v.mouseX - v.offsetX) / v.scale
+	imgY := (v.mouseY - v.offsetY) / v.scale
+	v.offsetX = v.mouseX - (imgX * newScale)
+	v.offsetY = v.mouseY - (imgY * newScale)
+	v.scale = newScale
+	v.Refresh()
+}
+
+func (v *Viewer) Dragged(event *fyne.DragEvent) {
+	v.offsetX += event.Dragged.DX
+	v.offsetY += event.Dragged.DY
+	v.Refresh()
+}
+
+func (v *Viewer) DragEnd() {}
+
 func (v *Viewer) LoadImage(path string) {
 	gen := atomic.AddUint64(&v.loadGen, 1)
-
-	// Cancel any pending zoom debounce before changing state.
-	v.mu.Lock()
-	if v.zoomTimer != nil {
-		if !v.zoomTimer.Stop() {
-			<-v.zoomTimer.C
-		}
-		v.zoomTimer = nil
-	}
-	v.mu.Unlock()
 
 	v.stopAnimation()
 
 	v.mu.Lock()
 	v.rotation = 0
-	v.zoomLevel = 1.0
-	v.fitMode = true
+	v.scale = 1.0
+	v.offsetX = 0
+	v.offsetY = 0
+	v.needsFit = true
 	v.invalidateRotationCacheLocked()
 	v.mu.Unlock()
 
-	// Animated images are never cached (they have their own frame buffer).
 	if animation.IsAnimatable(path) {
-		// Animated decode can be expensive — run in background.
 		go func() {
 			anim, err := animation.Decode(path)
 			if err != nil || anim == nil {
-				// Not animated or decode error — fall through to static.
-				// Inline the decode here instead of calling loadStaticAsync
-				// to avoid spawning a redundant nested goroutine.
 				v.decodeAndCommitStatic(path, gen)
 				return
 			}
 			if atomic.LoadUint64(&v.loadGen) != gen {
-				return // user navigated away
+				return
 			}
 			v.mu.Lock()
 			v.anim = anim
@@ -166,28 +184,34 @@ func (v *Viewer) LoadImage(path string) {
 			firstFrame, _ := anim.Frame(0)
 			v.originalImg = firstFrame
 			v.mu.Unlock()
+			v.applyTransforms()
+			v.fitToViewport()
+			if v.viewportW > 0 && v.viewportH > 0 {
+				v.needsFit = false
+			}
+			v.Refresh()
 			v.startAnimation()
 		}()
 		return
 	}
 
-	// Static image: check cache first for instant display.
 	if img, ok := v.cache.Get(path); ok {
 		v.mu.Lock()
 		v.originalImg = img
 		v.invalidateRotationCacheLocked()
 		v.mu.Unlock()
 		v.applyTransforms()
+		v.fitToViewport()
+		if v.viewportW > 0 && v.viewportH > 0 {
+			v.needsFit = false
+		}
+		v.Refresh()
 		return
 	}
 
-	// Cache miss — decode in the background.
 	go v.decodeAndCommitStatic(path, gen)
 }
 
-// decodeAndCommitStatic decodes a static image and commits it only if the
-// generation counter still matches. Called directly (not via goroutine)
-// when already running in a background goroutine.
 func (v *Viewer) decodeAndCommitStatic(path string, gen uint64) {
 	img, err := LoadImageFromFile(path)
 	if err != nil {
@@ -201,7 +225,7 @@ func (v *Viewer) decodeAndCommitStatic(path string, gen uint64) {
 	v.cache.Put(path, img)
 
 	if atomic.LoadUint64(&v.loadGen) != gen {
-		return // stale — user already moved on
+		return
 	}
 
 	v.mu.Lock()
@@ -209,16 +233,19 @@ func (v *Viewer) decodeAndCommitStatic(path string, gen uint64) {
 	v.invalidateRotationCacheLocked()
 	v.mu.Unlock()
 	v.applyTransforms()
+	v.fitToViewport()
+	if v.viewportW > 0 && v.viewportH > 0 {
+		v.needsFit = false
+	}
+	v.Refresh()
 }
 
-// PrefetchImage decodes an image into the cache without displaying it.
-// Called by the app layer to warm the cache for adjacent images.
 func (v *Viewer) PrefetchImage(path string) {
 	if _, ok := v.cache.Get(path); ok {
-		return // already cached
+		return
 	}
 	if animation.IsAnimatable(path) {
-		return // don't prefetch animations
+		return
 	}
 	img, err := LoadImageFromFile(path)
 	if err == nil {
@@ -226,8 +253,137 @@ func (v *Viewer) PrefetchImage(path string) {
 	}
 }
 
-// startAnimation launches a goroutine that cycles through animation frames
-// using the streaming Animation.Frame() API.
+func (v *Viewer) fitToViewport() {
+	v.mu.Lock()
+	origImg := v.originalImg
+	rotation := v.rotation
+	v.mu.Unlock()
+
+	if origImg == nil || v.viewportW == 0 || v.viewportH == 0 {
+		return
+	}
+
+	bounds := origImg.Bounds()
+	w := float32(bounds.Dx())
+	h := float32(bounds.Dy())
+
+	if rotation == 90 || rotation == 270 {
+		w, h = h, w
+	}
+
+	scaleW := v.viewportW / w
+	scaleH := v.viewportH / h
+	if scaleW < scaleH {
+		v.scale = scaleW
+	} else {
+		v.scale = scaleH
+	}
+
+	v.offsetX = (v.viewportW - w*v.scale) / 2
+	v.offsetY = (v.viewportH - h*v.scale) / 2
+}
+
+func (v *Viewer) zoomFromCenter(factor float32) {
+	v.mu.Lock()
+	isAnimated := v.isAnimated
+	v.mu.Unlock()
+
+	if !isAnimated {
+		newScale := v.scale * factor
+		if newScale < 0.1 {
+			newScale = 0.1
+		}
+		if newScale > 10.0 {
+			newScale = 10.0
+		}
+
+		cx := v.viewportW / 2
+		cy := v.viewportH / 2
+		imgX := (cx - v.offsetX) / v.scale
+		imgY := (cy - v.offsetY) / v.scale
+		v.offsetX = cx - (imgX * newScale)
+		v.offsetY = cy - (imgY * newScale)
+		v.scale = newScale
+		v.Refresh()
+	}
+}
+
+func (v *Viewer) ZoomIn() {
+	v.zoomFromCenter(1.05)
+}
+
+func (v *Viewer) ZoomOut() {
+	v.zoomFromCenter(1.0 / 1.05)
+}
+
+func (v *Viewer) ZoomFit() {
+	v.mu.Lock()
+	isAnimated := v.isAnimated
+	v.mu.Unlock()
+
+	if !isAnimated {
+		v.fitToViewport()
+		v.applyTransforms()
+		v.Refresh()
+	}
+}
+
+func (v *Viewer) ZoomOriginal() {
+	v.mu.Lock()
+	origImg := v.originalImg
+	isAnimated := v.isAnimated
+	v.mu.Unlock()
+
+	if origImg == nil || isAnimated {
+		return
+	}
+
+	v.scale = 1.0
+	bounds := origImg.Bounds()
+	w := float32(bounds.Dx())
+	h := float32(bounds.Dy())
+
+	if v.viewportW > 0 && v.viewportH > 0 {
+		v.offsetX = float32(math.Max(float64(0), float64((v.viewportW-w)/2)))
+		v.offsetY = float32(math.Max(float64(0), float64((v.viewportH-h)/2)))
+	} else {
+		v.offsetX = 0
+		v.offsetY = 0
+	}
+	v.applyTransforms()
+	v.Refresh()
+}
+
+func (v *Viewer) applyTransforms() {
+	v.mu.Lock()
+	origImg := v.originalImg
+	rotation := v.rotation
+	v.mu.Unlock()
+
+	if origImg == nil {
+		return
+	}
+
+	displayImg := v.getRotatedImage(origImg, rotation)
+	v.imageCanvas.Image = displayImg
+}
+
+func (v *Viewer) Rotate(clockwise bool) {
+	v.mu.Lock()
+	if clockwise {
+		v.rotation = (v.rotation + 90) % 360
+	} else {
+		v.rotation = (v.rotation + 270) % 360
+	}
+	isAnimated := v.isAnimated
+	v.mu.Unlock()
+
+	if !isAnimated {
+		v.applyTransforms()
+		v.Refresh()
+	}
+}
+
 func (v *Viewer) startAnimation() {
 	v.mu.Lock()
 	anim := v.anim
@@ -251,7 +407,6 @@ func (v *Viewer) startAnimation() {
 		loops := 0
 		for {
 			for i := 0; i < anim.FrameCount; i++ {
-				// Check for stop signal before processing the frame.
 				select {
 				case <-stop:
 					return
@@ -265,8 +420,9 @@ func (v *Viewer) startAnimation() {
 
 				v.mu.Lock()
 				rotation := v.rotation
-				fitMode := v.fitMode
-				zoomLevel := v.zoomLevel
+				scale := v.scale
+				offsetX := v.offsetX
+				offsetY := v.offsetY
 				v.mu.Unlock()
 
 				displayImg := goimage.Image(frame)
@@ -274,24 +430,15 @@ func (v *Viewer) startAnimation() {
 					displayImg = rotateImage(displayImg, rotation)
 				}
 
-				v.mu.Lock()
+				bounds := displayImg.Bounds()
+				w := float32(bounds.Dx()) * scale
+				h := float32(bounds.Dy()) * scale
+
 				v.imageCanvas.Image = displayImg
-
-				if fitMode {
-					v.imageCanvas.FillMode = canvas.ImageFillContain
-					v.imageCanvas.SetMinSize(fyne.NewSize(0, 0))
-				} else {
-					bounds := displayImg.Bounds()
-					w := float32(float64(bounds.Dx()) * zoomLevel)
-					h := float32(float64(bounds.Dy()) * zoomLevel)
-					v.imageCanvas.FillMode = canvas.ImageFillOriginal
-					v.imageCanvas.SetMinSize(fyne.NewSize(w, h))
-				}
-
+				v.imageCanvas.Resize(fyne.NewSize(w, h))
+				v.imageCanvas.Move(fyne.NewPos(offsetX, offsetY))
 				v.imageCanvas.Refresh()
-				v.mu.Unlock()
 
-				// Wait for the frame delay, but remain responsive to stop.
 				select {
 				case <-stop:
 					return
@@ -307,7 +454,6 @@ func (v *Viewer) startAnimation() {
 	}()
 }
 
-// stopAnimation signals the playback goroutine to exit and waits for it to finish.
 func (v *Viewer) stopAnimation() {
 	v.mu.Lock()
 	stop := v.animStop
@@ -322,29 +468,35 @@ func (v *Viewer) stopAnimation() {
 		close(stop)
 	}
 	if done != nil {
-		<-done // wait for goroutine to exit before proceeding
+		<-done
 	}
 }
 
-// invalidateRotationCacheLocked clears the cached rotated image.
-// Caller must hold v.mu.
+func (v *Viewer) Clear() {
+	v.stopAnimation()
+	v.imageCanvas.Image = nil
+	v.mu.Lock()
+	v.originalImg = nil
+	v.scale = 1.0
+	v.rotation = 0
+	v.offsetX = 0
+	v.offsetY = 0
+	v.invalidateRotationCacheLocked()
+	v.mu.Unlock()
+	v.Refresh()
+}
+
 func (v *Viewer) invalidateRotationCacheLocked() {
 	v.cachedRotatedImg = nil
 	v.cachedOrigPtr = nil
 	v.cachedRotation = -1
 }
 
-// getRotatedImage returns the rotated version of the original image, using
-// a cache to avoid expensive re-rotation when only zoom changes.
-// Caller must hold v.mu when reading origImg/rotation, but this method
-// does NOT hold the lock during the (potentially slow) rotation itself.
 func (v *Viewer) getRotatedImage(origImg goimage.Image, rotation int) goimage.Image {
-	// Fast path: no rotation needed.
 	if rotation == 0 {
 		return origImg
 	}
 
-	// Check if we already have the rotated version cached.
 	v.mu.Lock()
 	if v.cachedOrigPtr == origImg && v.cachedRotation == rotation && v.cachedRotatedImg != nil {
 		cached := v.cachedRotatedImg
@@ -353,10 +505,8 @@ func (v *Viewer) getRotatedImage(origImg goimage.Image, rotation int) goimage.Im
 	}
 	v.mu.Unlock()
 
-	// Rotate (expensive) without holding the lock.
 	rotated := rotateImage(origImg, rotation)
 
-	// Store in cache.
 	v.mu.Lock()
 	v.cachedOrigPtr = origImg
 	v.cachedRotation = rotation
@@ -366,196 +516,8 @@ func (v *Viewer) getRotatedImage(origImg goimage.Image, rotation int) goimage.Im
 	return rotated
 }
 
-// applyTransforms applies rotation and zoom to the current static image.
-// Rotation results are cached so that rapid zoom changes (e.g. scroll wheel)
-// skip the expensive rotation step.
-func (v *Viewer) applyTransforms() {
-	v.mu.Lock()
-	origImg := v.originalImg
-	rotation := v.rotation
-	fitMode := v.fitMode
-	zoomLevel := v.zoomLevel
-	v.mu.Unlock()
-
-	if origImg == nil {
-		return
-	}
-
-	displayImg := v.getRotatedImage(origImg, rotation)
-
-	v.imageCanvas.Image = displayImg
-
-	if fitMode {
-		v.imageCanvas.FillMode = canvas.ImageFillContain
-		v.imageCanvas.SetMinSize(fyne.NewSize(0, 0))
-	} else {
-		bounds := displayImg.Bounds()
-		w := float32(float64(bounds.Dx()) * zoomLevel)
-		h := float32(float64(bounds.Dy()) * zoomLevel)
-		v.imageCanvas.FillMode = canvas.ImageFillOriginal
-		v.imageCanvas.SetMinSize(fyne.NewSize(w, h))
-	}
-
-	v.imageCanvas.Refresh()
-}
-
-// scheduleApplyTransforms debounces rapid zoom changes (e.g. from scroll
-// wheel) so that applyTransforms runs at most once per 16ms (~60fps).
-// Callers should check isAnimated first — animated playback picks up new
-// values on the next frame boundary and the timer is unnecessary.
-func (v *Viewer) scheduleApplyTransforms() {
-	v.mu.Lock()
-	if v.zoomTimer != nil {
-		if !v.zoomTimer.Stop() {
-			<-v.zoomTimer.C
-		}
-	}
-	v.zoomTimer = time.AfterFunc(16*time.Millisecond, func() {
-		v.applyTransforms()
-	})
-	v.mu.Unlock()
-}
-
-// Rotate rotates the image by 90 degrees.
-func (v *Viewer) Rotate(clockwise bool) {
-	v.mu.Lock()
-	if clockwise {
-		v.rotation = (v.rotation + 90) % 360
-	} else {
-		v.rotation = (v.rotation + 270) % 360
-	}
-	isAnimated := v.isAnimated
-	v.mu.Unlock()
-
-	// For animated images the playback goroutine picks up the new rotation on
-	// the next frame. For static images we apply immediately.
-	if !isAnimated {
-		v.applyTransforms()
-	}
-}
-
-// ZoomIn increases zoom by 10%.
-func (v *Viewer) ZoomIn() {
-	v.mu.Lock()
-	if v.fitMode {
-		v.zoomLevel = v.computeFitZoomLocked()
-		v.fitMode = false
-	}
-	v.zoomLevel *= 1.1
-	if v.zoomLevel > 10.0 {
-		v.zoomLevel = 10.0
-	}
-	isAnimated := v.isAnimated
-	v.mu.Unlock()
-
-	if !isAnimated {
-		v.scheduleApplyTransforms()
-	}
-}
-
-// ZoomOut decreases zoom by 10%.
-func (v *Viewer) ZoomOut() {
-	v.mu.Lock()
-	if v.fitMode {
-		v.zoomLevel = v.computeFitZoomLocked()
-		v.fitMode = false
-	}
-	v.zoomLevel /= 1.1
-	if v.zoomLevel < 0.1 {
-		v.zoomLevel = 0.1
-	}
-	isAnimated := v.isAnimated
-	v.mu.Unlock()
-
-	if !isAnimated {
-		v.scheduleApplyTransforms()
-	}
-}
-
-// computeFitZoomLocked estimates the zoom level that corresponds to the
-// current fit-to-window view, so that switching from fit mode to manual
-// zoom starts at the perceived scale. Caller must hold v.mu.
-func (v *Viewer) computeFitZoomLocked() float64 {
-	if v.originalImg == nil {
-		return 1.0
-	}
-	img := v.originalImg
-	bounds := img.Bounds()
-	imgW := float64(bounds.Dx())
-	imgH := float64(bounds.Dy())
-
-	if v.rotation == 90 || v.rotation == 270 {
-		// Dimensions swap when rotated
-		imgW, imgH = imgH, imgW
-	}
-
-	if imgW == 0 || imgH == 0 {
-		return 1.0
-	}
-
-	viewW := float64(v.scroll.Size().Width)
-	viewH := float64(v.scroll.Size().Height)
-
-	if viewW == 0 || viewH == 0 {
-		return 1.0
-	}
-
-	scaleW := viewW / imgW
-	scaleH := viewH / imgH
-	if scaleW < scaleH {
-		return scaleW
-	}
-	return scaleH
-}
-
-// ZoomFit fits the image to the window.
-func (v *Viewer) ZoomFit() {
-	v.mu.Lock()
-	v.zoomLevel = 1.0
-	v.fitMode = true
-	isAnimated := v.isAnimated
-	v.mu.Unlock()
-
-	if !isAnimated {
-		v.applyTransforms()
-	}
-}
-
-// ZoomOriginal displays the image at its original size (100%).
-func (v *Viewer) ZoomOriginal() {
-	v.mu.Lock()
-	v.zoomLevel = 1.0
-	v.fitMode = false
-	isAnimated := v.isAnimated
-	v.mu.Unlock()
-
-	if !isAnimated {
-		v.applyTransforms()
-	}
-}
-
-// Clear clears the current image and stops any animation.
-func (v *Viewer) Clear() {
-	v.stopAnimation()
-	v.imageCanvas.Image = nil
-	v.imageCanvas.SetMinSize(fyne.NewSize(0, 0))
-	v.imageCanvas.Refresh()
-	v.mu.Lock()
-	v.originalImg = nil
-	v.zoomLevel = 1.0
-	v.rotation = 0
-	v.fitMode = true
-	v.invalidateRotationCacheLocked()
-	v.mu.Unlock()
-}
-
-// maxImageDimension caps the width/height we will attempt to rotate or
-// convert to RGBA. This prevents OOM from decompression bombs or corrupt
-// headers. 16384 px per side × 4 bytes × 16384 ≈ 1 GiB worst case.
 const maxImageDimension = 16384
 
-// rotateImage rotates a Go image by the specified degrees (90, 180, 270).
-// Uses direct RGBA buffer manipulation for performance.
 func rotateImage(src goimage.Image, degrees int) goimage.Image {
 	rgba := toRGBA(src)
 	bounds := rgba.Bounds()
@@ -610,10 +572,6 @@ func rotateImage(src goimage.Image, degrees int) goimage.Image {
 	}
 }
 
-// toRGBA converts any image.Image to *image.RGBA for direct pixel access.
-// Uses draw.Draw which has optimised fast-paths for common source types
-// (YCbCr from JPEG, Paletted from GIF, NRGBA from PNG) — ~3-4× faster than
-// per-pixel Set/At.
 func toRGBA(src goimage.Image) *goimage.RGBA {
 	if rgba, ok := src.(*goimage.RGBA); ok {
 		return rgba

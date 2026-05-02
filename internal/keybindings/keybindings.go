@@ -15,8 +15,8 @@ VIEW
   f          Toggle fullscreen
   + / =      Zoom in
   -          Zoom out
-  Scroll ↑   Zoom in
-  Scroll ↓   Zoom out
+  Ctrl+Scroll ↑  Zoom in
+  Ctrl+Scroll ↓  Zoom out
   0          Fit to window
   1          Original size (1:1)
 

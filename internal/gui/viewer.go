@@ -32,10 +32,15 @@ func newZoomScrollContainer(scroll *container.Scroll, viewer *Viewer) *zoomScrol
 
 // Scrolled intercepts mouse wheel events and delegates to zoom.
 func (z *zoomScrollContainer) Scrolled(ev *fyne.ScrollEvent) {
+	if !z.viewer.ctrlHeld.Load() {
+		z.scroll.Scrolled(ev)
+		return
+	}
+
 	if ev.Scrolled.DY > 0 {
-		z.viewer.ZoomIn()
-	} else if ev.Scrolled.DY < 0 {
 		z.viewer.ZoomOut()
+	} else if ev.Scrolled.DY < 0 {
+		z.viewer.ZoomIn()
 	}
 }
 
@@ -73,6 +78,10 @@ type Viewer struct {
 	// single applyTransforms call, avoiding redundant work.
 	zoomTimer *time.Timer
 
+	// ctrlHeld is set by the window key handlers so scroll only zooms while
+	// the user is holding Ctrl.
+	ctrlHeld atomic.Bool
+
 	// Animation state (also protected by mu)
 	anim       *animation.Animation
 	animStop   chan struct{} // closed to signal the playback goroutine to exit
@@ -98,6 +107,11 @@ func NewViewer() *Viewer {
 	v.outerWidget = newZoomScrollContainer(v.scroll, v)
 
 	return v
+}
+
+// SetCtrlHeld updates whether Ctrl is currently pressed.
+func (v *Viewer) SetCtrlHeld(held bool) {
+	v.ctrlHeld.Store(held)
 }
 
 // Widget returns the zoomable container that wraps the scroll view.

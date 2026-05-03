@@ -34,6 +34,8 @@ type Viewer struct {
 	viewportW   float32
 	viewportH   float32
 	needsFit    bool
+	lastFitW    float32
+	lastFitH    float32
 
 	anim       *animation.Animation
 	animStop   chan struct{}
@@ -75,14 +77,20 @@ type viewerRenderer struct {
 
 func (r *viewerRenderer) Layout(size fyne.Size) {
 	v := r.viewer
+
+	v.mu.Lock()
 	v.viewportW = float32(size.Width)
 	v.viewportH = float32(size.Height)
+	origImg := v.originalImg
+	needsFit := v.needsFit
+	viewportChanged := v.viewportW != v.lastFitW || v.viewportH != v.lastFitH
+	if needsFit && origImg != nil {
+		v.needsFit = false
+	}
+	v.mu.Unlock()
 
-	if v.needsFit {
-		if v.originalImg != nil {
-			v.needsFit = false
-			v.fitToViewport()
-		}
+	if origImg != nil && v.viewportW > 0 && v.viewportH > 0 && (needsFit || viewportChanged) {
+		v.fitToViewport()
 	}
 
 	v.positionImage()
@@ -99,7 +107,6 @@ func (r *viewerRenderer) Refresh() {
 		v.fitToViewport()
 	}
 	v.positionImage()
-	canvas.Refresh(v.imageCanvas)
 }
 
 func (r *viewerRenderer) Objects() []fyne.CanvasObject {
@@ -109,19 +116,28 @@ func (r *viewerRenderer) Objects() []fyne.CanvasObject {
 func (r *viewerRenderer) Destroy() {}
 
 func (v *Viewer) positionImage() {
-	if v.imageCanvas.Image == nil {
+	v.mu.Lock()
+	img := v.imageCanvas.Image
+	scale := v.scale
+	offsetX := v.offsetX
+	offsetY := v.offsetY
+	v.mu.Unlock()
+
+	if img == nil {
 		return
 	}
-	bounds := v.imageCanvas.Image.Bounds()
-	w := float32(bounds.Dx()) * v.scale
-	h := float32(bounds.Dy()) * v.scale
+	bounds := img.Bounds()
+	w := float32(bounds.Dx()) * scale
+	h := float32(bounds.Dy()) * scale
 	v.imageCanvas.Resize(fyne.NewSize(w, h))
-	v.imageCanvas.Move(fyne.NewPos(v.offsetX, v.offsetY))
+	v.imageCanvas.Move(fyne.NewPos(offsetX, offsetY))
 }
 
 func (v *Viewer) MouseMoved(event *desktop.MouseEvent) {
+	v.mu.Lock()
 	v.mouseX = event.Position.X
 	v.mouseY = event.Position.Y
+	v.mu.Unlock()
 }
 
 func (v *Viewer) MouseIn(*desktop.MouseEvent) {}
@@ -136,6 +152,7 @@ func (v *Viewer) Scrolled(ev *fyne.ScrollEvent) {
 		factor = 2.0
 	}
 
+	v.mu.Lock()
 	newScale := v.scale * factor
 	if newScale < 0.1 {
 		newScale = 0.1
@@ -149,12 +166,15 @@ func (v *Viewer) Scrolled(ev *fyne.ScrollEvent) {
 	v.offsetX = v.mouseX - (imgX * newScale)
 	v.offsetY = v.mouseY - (imgY * newScale)
 	v.scale = newScale
+	v.mu.Unlock()
 	v.Refresh()
 }
 
 func (v *Viewer) Dragged(event *fyne.DragEvent) {
+	v.mu.Lock()
 	v.offsetX += event.Dragged.DX
 	v.offsetY += event.Dragged.DY
+	v.mu.Unlock()
 	v.Refresh()
 }
 
@@ -171,6 +191,8 @@ func (v *Viewer) LoadImage(path string) {
 	v.offsetX = 0
 	v.offsetY = 0
 	v.needsFit = true
+	v.lastFitW = 0
+	v.lastFitH = 0
 	v.invalidateRotationCacheLocked()
 	v.mu.Unlock()
 
@@ -222,7 +244,9 @@ func (v *Viewer) decodeAndCommitStatic(path string, gen uint64) {
 	img, err := LoadImageFromFile(path)
 	if err != nil {
 		if atomic.LoadUint64(&v.loadGen) == gen {
+			v.mu.Lock()
 			v.imageCanvas.Image = nil
+			v.mu.Unlock()
 			v.imageCanvas.Refresh()
 		}
 		return
@@ -263,9 +287,11 @@ func (v *Viewer) fitToViewport() {
 	v.mu.Lock()
 	origImg := v.originalImg
 	rotation := v.rotation
-	v.mu.Unlock()
+	viewportW := v.viewportW
+	viewportH := v.viewportH
 
-	if origImg == nil || v.viewportW == 0 || v.viewportH == 0 {
+	if origImg == nil || viewportW == 0 || viewportH == 0 {
+		v.mu.Unlock()
 		return
 	}
 
@@ -277,16 +303,20 @@ func (v *Viewer) fitToViewport() {
 		w, h = h, w
 	}
 
-	scaleW := v.viewportW / w
-	scaleH := v.viewportH / h
+	scaleW := viewportW / w
+	scaleH := viewportH / h
 	if scaleW < scaleH {
 		v.scale = scaleW
 	} else {
 		v.scale = scaleH
 	}
 
-	v.offsetX = (v.viewportW - w*v.scale) / 2
-	v.offsetY = (v.viewportH - h*v.scale) / 2
+	v.offsetX = (viewportW - w*v.scale) / 2
+	v.offsetY = (viewportH - h*v.scale) / 2
+
+	v.lastFitW = viewportW
+	v.lastFitH = viewportH
+	v.mu.Unlock()
 }
 
 func (v *Viewer) zoomFromCenter(factor float32) {
@@ -294,24 +324,28 @@ func (v *Viewer) zoomFromCenter(factor float32) {
 	isAnimated := v.isAnimated
 	v.mu.Unlock()
 
-	if !isAnimated {
-		newScale := v.scale * factor
-		if newScale < 0.1 {
-			newScale = 0.1
-		}
-		if newScale > 10.0 {
-			newScale = 10.0
-		}
-
-		cx := v.viewportW / 2
-		cy := v.viewportH / 2
-		imgX := (cx - v.offsetX) / v.scale
-		imgY := (cy - v.offsetY) / v.scale
-		v.offsetX = cx - (imgX * newScale)
-		v.offsetY = cy - (imgY * newScale)
-		v.scale = newScale
-		v.Refresh()
+	if isAnimated {
+		return
 	}
+
+	v.mu.Lock()
+	newScale := v.scale * factor
+	if newScale < 0.1 {
+		newScale = 0.1
+	}
+	if newScale > 10.0 {
+		newScale = 10.0
+	}
+
+	cx := v.viewportW / 2
+	cy := v.viewportH / 2
+	imgX := (cx - v.offsetX) / v.scale
+	imgY := (cy - v.offsetY) / v.scale
+	v.offsetX = cx - (imgX * newScale)
+	v.offsetY = cy - (imgY * newScale)
+	v.scale = newScale
+	v.mu.Unlock()
+	v.Refresh()
 }
 
 func (v *Viewer) ZoomIn() {
@@ -338,9 +372,9 @@ func (v *Viewer) ZoomOriginal() {
 	v.mu.Lock()
 	origImg := v.originalImg
 	isAnimated := v.isAnimated
-	v.mu.Unlock()
 
 	if origImg == nil || isAnimated {
+		v.mu.Unlock()
 		return
 	}
 
@@ -356,22 +390,9 @@ func (v *Viewer) ZoomOriginal() {
 		v.offsetX = 0
 		v.offsetY = 0
 	}
+	v.mu.Unlock()
 	v.applyTransforms()
 	v.Refresh()
-}
-
-func (v *Viewer) applyTransforms() {
-	v.mu.Lock()
-	origImg := v.originalImg
-	rotation := v.rotation
-	v.mu.Unlock()
-
-	if origImg == nil {
-		return
-	}
-
-	displayImg := v.getRotatedImage(origImg, rotation)
-	v.imageCanvas.Image = displayImg
 }
 
 func (v *Viewer) Rotate(clockwise bool) {
@@ -440,9 +461,11 @@ func (v *Viewer) startAnimation() {
 				w := float32(bounds.Dx()) * scale
 				h := float32(bounds.Dy()) * scale
 
+				v.mu.Lock()
 				v.imageCanvas.Image = displayImg
 				v.imageCanvas.Resize(fyne.NewSize(w, h))
 				v.imageCanvas.Move(fyne.NewPos(offsetX, offsetY))
+				v.mu.Unlock()
 				v.imageCanvas.Refresh()
 
 				select {
@@ -463,7 +486,6 @@ func (v *Viewer) startAnimation() {
 func (v *Viewer) stopAnimation() {
 	v.mu.Lock()
 	stop := v.animStop
-	done := v.animDone
 	v.animStop = nil
 	v.animDone = nil
 	v.anim = nil
@@ -472,9 +494,6 @@ func (v *Viewer) stopAnimation() {
 
 	if stop != nil {
 		close(stop)
-	}
-	if done != nil {
-		<-done
 	}
 }
 
@@ -487,6 +506,8 @@ func (v *Viewer) Clear() {
 	v.rotation = 0
 	v.offsetX = 0
 	v.offsetY = 0
+	v.lastFitW = 0
+	v.lastFitH = 0
 	v.invalidateRotationCacheLocked()
 	v.mu.Unlock()
 	v.Refresh()
@@ -522,17 +543,36 @@ func (v *Viewer) getRotatedImage(origImg goimage.Image, rotation int) goimage.Im
 	return rotated
 }
 
+func (v *Viewer) applyTransforms() {
+	v.mu.Lock()
+	origImg := v.originalImg
+	rotation := v.rotation
+	v.mu.Unlock()
+
+	if origImg == nil {
+		return
+	}
+
+	displayImg := v.getRotatedImage(origImg, rotation)
+
+	v.mu.Lock()
+	v.imageCanvas.Image = displayImg
+	v.mu.Unlock()
+	v.imageCanvas.Refresh()
+}
+
 const maxImageDimension = 16384
 
 func rotateImage(src goimage.Image, degrees int) goimage.Image {
-	rgba := toRGBA(src)
-	bounds := rgba.Bounds()
-	w := bounds.Dx()
-	h := bounds.Dy()
-
-	if w > maxImageDimension || h > maxImageDimension {
+	bounds := src.Bounds()
+	if bounds.Dx() > maxImageDimension || bounds.Dy() > maxImageDimension {
 		return src
 	}
+
+	rgba := toRGBA(src)
+	bounds = rgba.Bounds()
+	w := bounds.Dx()
+	h := bounds.Dy()
 	srcStride := rgba.Stride
 	srcPix := rgba.Pix
 
@@ -583,11 +623,6 @@ func toRGBA(src goimage.Image) *goimage.RGBA {
 		return rgba
 	}
 	bounds := src.Bounds()
-	w := bounds.Dx()
-	h := bounds.Dy()
-	if w > maxImageDimension || h > maxImageDimension {
-		return goimage.NewRGBA(goimage.Rect(0, 0, 1, 1))
-	}
 	dst := goimage.NewRGBA(bounds)
 	godraw.Draw(dst, bounds, src, bounds.Min, godraw.Src)
 	return dst

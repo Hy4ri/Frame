@@ -8,11 +8,11 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/rwcarlsen/goexif/exif"
 	_ "golang.org/x/image/bmp"
 	_ "golang.org/x/image/tiff"
 	_ "golang.org/x/image/webp"
@@ -39,28 +39,35 @@ func MoveToTrash(path string) error {
 
 	name := filepath.Base(path)
 	dest := filepath.Join(filesDir, name)
-	if _, err := os.Stat(dest); err == nil {
-		ext := filepath.Ext(name)
-		base := strings.TrimSuffix(name, ext)
-		for i := 1; ; i++ {
-			dest = filepath.Join(filesDir, fmt.Sprintf("%s_%d%s", base, i, ext))
-			if _, err := os.Stat(dest); os.IsNotExist(err) {
-				break
-			}
+	ext := filepath.Ext(name)
+	base := strings.TrimSuffix(name, ext)
+	for i := 1; ; i++ {
+		if _, err := os.Stat(dest); os.IsNotExist(err) {
+			break
 		}
+		dest = filepath.Join(filesDir, fmt.Sprintf("%s_%d%s", base, i, ext))
 	}
 
-	if err := os.Rename(path, dest); err != nil {
-		return fmt.Errorf("move to trash: %w", err)
-	}
-
+	// Write .trashinfo atomically before moving the file, so a crash
+	// between writing the info and moving the file leaves an orphan
+	// .trashinfo rather than a missing one.
 	info := fmt.Sprintf(
 		"[Trash Info]\nPath=%s\nDeletionDate=%s\n",
 		path, time.Now().Format("2006-01-02T15:04:05"),
 	)
 	infoName := strings.TrimSuffix(filepath.Base(dest), filepath.Ext(dest)) + ".trashinfo"
 	infoPath := filepath.Join(infoDir, infoName)
-	if err := os.WriteFile(infoPath, []byte(info), 0644); err != nil {
+	tmpInfoPath := infoPath + ".tmp"
+	if err := os.WriteFile(tmpInfoPath, []byte(info), 0644); err != nil {
+		return fmt.Errorf("move to trash: %w", err)
+	}
+	if err := os.Rename(tmpInfoPath, infoPath); err != nil {
+		os.Remove(tmpInfoPath)
+		return fmt.Errorf("move to trash: %w", err)
+	}
+
+	if err := os.Rename(path, dest); err != nil {
+		os.Remove(infoPath)
 		return fmt.Errorf("move to trash: %w", err)
 	}
 
@@ -86,7 +93,6 @@ func Rename(oldPath, newName string) (string, error) {
 // Info contains metadata about an image file.
 type Info struct {
 	Name     string
-	Path     string
 	FileSize string
 	Width    int
 	Height   int
@@ -104,7 +110,6 @@ func GetInfo(path string) (*Info, error) {
 
 	info := &Info{
 		Name:     filepath.Base(path),
-		Path:     path,
 		FileSize: formatFileSize(stat.Size()),
 		Modified: stat.ModTime().Format(time.RFC1123),
 		Format:   getFormatFromExt(filepath.Ext(path)),
@@ -179,13 +184,40 @@ func getFormatFromExt(ext string) string {
 	return "Unknown"
 }
 
-// getExifData attempts to extract basic EXIF data using exiftool.
-// Returns empty string if exiftool is not available or extraction fails.
+// getExifData extracts basic EXIF data using Go's native EXIF decoder.
+// Returns empty string if no EXIF data is present or extraction fails.
 func getExifData(path string) string {
-	cmd := exec.Command("exiftool", "-s", "-Make", "-Model", "-DateTimeOriginal", "-ExposureTime", "-FNumber", "-ISO", path)
-	output, err := cmd.Output()
+	f, err := os.Open(path)
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(output))
+	defer f.Close()
+
+	x, err := exif.Decode(f)
+	if err != nil {
+		return ""
+	}
+
+	var parts []string
+
+	if tag, err := x.Get(exif.Make); err == nil {
+		parts = append(parts, tag.String())
+	}
+	if tag, err := x.Get(exif.Model); err == nil {
+		parts = append(parts, tag.String())
+	}
+	if tag, err := x.Get(exif.DateTimeOriginal); err == nil {
+		parts = append(parts, tag.String())
+	}
+	if tag, err := x.Get(exif.ExposureTime); err == nil {
+		parts = append(parts, tag.String())
+	}
+	if tag, err := x.Get(exif.FNumber); err == nil {
+		parts = append(parts, tag.String())
+	}
+	if tag, err := x.Get(exif.ISOSpeedRatings); err == nil {
+		parts = append(parts, fmt.Sprintf("ISO %s", tag.String()))
+	}
+
+	return strings.Join(parts, "\n")
 }

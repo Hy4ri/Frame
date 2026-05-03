@@ -15,7 +15,7 @@ func main() {
 		absPath, err := filepath.Abs(os.Args[1])
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error resolving path: %v\n", err)
-			absPath = os.Args[1]
+			os.Exit(1)
 		}
 		initialPath = absPath
 	}

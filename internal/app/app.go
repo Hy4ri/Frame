@@ -169,6 +169,7 @@ func (a *App) DeleteCurrent() {
 
 		a.window.InvalidateCache(currentPath)
 		a.images = append(a.images[:a.currentIndex], a.images[a.currentIndex+1:]...)
+		a.window.InvalidateCache(currentPath)
 
 		if len(a.images) == 0 {
 			a.window.ClearImage()
@@ -259,14 +260,6 @@ func (a *App) ZoomOriginal() {
 // Quit exits the application.
 func (a *App) Quit() {
 	a.window.Close()
-}
-
-// GetCurrentPath returns the current image path.
-func (a *App) GetCurrentPath() string {
-	if a.currentIndex < 0 || a.currentIndex >= len(a.images) {
-		return ""
-	}
-	return a.images[a.currentIndex]
 }
 
 // GetImageCount returns the total number of images.

@@ -21,6 +21,10 @@ import (
 // reasonable floor.
 const minFrameDelay = 10 * time.Millisecond
 
+// maxImageDimension is the maximum allowed image width or height in pixels.
+// Images exceeding this will not be decoded to prevent OOM.
+const maxImageDimension = 16384
+
 // maxCachedFrames is the sliding-window size for composited frames.
 // Only this many composited frames are held in memory at once; older ones
 // are evicted and re-composited on demand. 30 frames ≈ 1 second of typical
@@ -139,6 +143,11 @@ func decodeGIF(path string) (*Animation, error) {
 		height = bounds.Max.Y
 	}
 
+	if width > maxImageDimension || height > maxImageDimension {
+		return nil, fmt.Errorf("image dimensions %dx%d exceed maximum %d",
+			width, height, maxImageDimension)
+	}
+
 	return &Animation{
 		FrameCount: len(g.Image),
 		LoopCount:  g.LoopCount,
@@ -170,6 +179,13 @@ func decodeAPNG(path string) (*Animation, error) {
 	}
 
 	firstBounds := a.Frames[0].Image.Bounds()
+
+	w := firstBounds.Dx()
+	h := firstBounds.Dy()
+	if w > maxImageDimension || h > maxImageDimension {
+		return nil, fmt.Errorf("image dimensions %dx%d exceed maximum %d",
+			w, h, maxImageDimension)
+	}
 
 	return &Animation{
 		FrameCount: len(a.Frames),

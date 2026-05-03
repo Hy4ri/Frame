@@ -40,7 +40,6 @@ type AppController interface {
 	ZoomFit()
 	ZoomOriginal()
 	Quit()
-	GetCurrentPath() string
 	GetImageCount() int
 	GetCurrentIndex() int
 	OpenPath(path string)
@@ -326,9 +325,18 @@ func (w *Window) ShowRenameDialog(path string, callback func(string)) {
 	d := dialog.NewForm("Rename Image", "Rename", "Cancel", items, func(confirmed bool) {
 		if confirmed {
 			newName := strings.TrimSpace(entry.Text)
-			// Strip any trailing extension the user may have typed so
-			// "image.jpg" doesn't become "image.jpg.jpg".
-			if e := filepath.Ext(newName); e != "" {
+			if newName == "" {
+				callback("")
+				return
+			}
+			if strings.ContainsAny(newName, "/\\") || strings.Contains(newName, "..") {
+				w.ShowError("Name must not contain path separators or \"..\"")
+				callback("")
+				return
+			}
+			// Only strip extension if it matches the original file's extension,
+			// so "image.jpg" doesn't become "image.jpg.jpeg".
+			if e := filepath.Ext(newName); e != "" && strings.EqualFold(e, ext) {
 				newName = strings.TrimSuffix(newName, e)
 			}
 			callback(newName + ext)
@@ -390,6 +398,20 @@ func LoadImageFromFile(path string) (image.Image, error) {
 		return nil, err
 	}
 	defer f.Close()
+
+	cfg, _, err := image.DecodeConfig(f)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.Width > maxImageDimension || cfg.Height > maxImageDimension {
+		return nil, fmt.Errorf(
+			"image dimensions %dx%d exceed maximum %d",
+			cfg.Width, cfg.Height, maxImageDimension,
+		)
+	}
+	if _, err := f.Seek(0, 0); err != nil {
+		return nil, err
+	}
 
 	img, _, err := image.Decode(f)
 	if err != nil {

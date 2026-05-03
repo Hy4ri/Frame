@@ -18,28 +18,53 @@ import (
 	_ "golang.org/x/image/webp"
 )
 
-// MoveToTrash moves a file to the system trash using gio (GNOME) or fallback methods.
-// Returns an error if no trash method is available.
+// MoveToTrash moves a file to the XDG trash directory
+// (~/.local/share/Trash/files/) following the freedesktop.org Trash
+// specification. Creates the trash directories if they don't exist and
+// writes a .trashinfo file with the original path and deletion date.
 func MoveToTrash(path string) error {
-	// Try gio (GNOME) first
-	cmd := exec.Command("gio", "trash", path)
-	if err := cmd.Run(); err == nil {
-		return nil
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("move to trash: %w", err)
 	}
 
-	// Fallback to trash-cli
-	cmd = exec.Command("trash", path)
-	if err := cmd.Run(); err == nil {
-		return nil
+	filesDir := filepath.Join(home, ".local/share/Trash/files")
+	infoDir := filepath.Join(home, ".local/share/Trash/info")
+
+	for _, d := range []string{filesDir, infoDir} {
+		if err := os.MkdirAll(d, 0700); err != nil {
+			return fmt.Errorf("move to trash: %w", err)
+		}
 	}
 
-	// Fallback to freedesktop.org compliant trash (e.g., trash-cli, gvfs-trash)
-	cmd = exec.Command("trash-put", path)
-	if err := cmd.Run(); err == nil {
-		return nil
+	name := filepath.Base(path)
+	dest := filepath.Join(filesDir, name)
+	if _, err := os.Stat(dest); err == nil {
+		ext := filepath.Ext(name)
+		base := strings.TrimSuffix(name, ext)
+		for i := 1; ; i++ {
+			dest = filepath.Join(filesDir, fmt.Sprintf("%s_%d%s", base, i, ext))
+			if _, err := os.Stat(dest); os.IsNotExist(err) {
+				break
+			}
+		}
 	}
 
-	return fmt.Errorf("move to trash failed: no suitable trash command found (tried gio, trash, trash-put)")
+	if err := os.Rename(path, dest); err != nil {
+		return fmt.Errorf("move to trash: %w", err)
+	}
+
+	info := fmt.Sprintf(
+		"[Trash Info]\nPath=%s\nDeletionDate=%s\n",
+		path, time.Now().Format("2006-01-02T15:04:05"),
+	)
+	infoName := strings.TrimSuffix(filepath.Base(dest), filepath.Ext(dest)) + ".trashinfo"
+	infoPath := filepath.Join(infoDir, infoName)
+	if err := os.WriteFile(infoPath, []byte(info), 0644); err != nil {
+		return fmt.Errorf("move to trash: %w", err)
+	}
+
+	return nil
 }
 
 // Rename renames a file to a new name in the same directory.

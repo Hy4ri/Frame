@@ -79,8 +79,10 @@ func (r *viewerRenderer) Layout(size fyne.Size) {
 	v.viewportH = float32(size.Height)
 
 	if v.needsFit {
-		v.needsFit = false
-		v.fitToViewport()
+		if v.originalImg != nil {
+			v.needsFit = false
+			v.fitToViewport()
+		}
 	}
 
 	v.positionImage()
@@ -92,6 +94,10 @@ func (r *viewerRenderer) MinSize() fyne.Size {
 
 func (r *viewerRenderer) Refresh() {
 	v := r.viewer
+	if v.needsFit && v.originalImg != nil && v.viewportW > 0 && v.viewportH > 0 {
+		v.needsFit = false
+		v.fitToViewport()
+	}
 	v.positionImage()
 	canvas.Refresh(v.imageCanvas)
 }

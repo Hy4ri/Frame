@@ -50,6 +50,10 @@ func (c *imageCache) Put(path string, img image.Image) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if c.capacity <= 0 {
+		return
+	}
+
 	// If already present, update and move to most-recent.
 	if _, ok := c.entries[path]; ok {
 		c.entries[path] = img

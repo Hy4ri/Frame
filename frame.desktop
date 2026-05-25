@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Frame
+Comment=Fast, minimal image viewer for Linux with vim keybindings
+Categories=Graphics;Viewer;
+Exec=frame %f
+Icon=frame
+Terminal=false
+MimeType=image/jpeg;image/png;image/gif;image/webp;image/bmp;image/tiff;image/vnd.microsoft.icon;image/apng;
+StartupNotify=false

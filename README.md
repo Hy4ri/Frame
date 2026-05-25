@@ -1,6 +1,6 @@
 # Frame
 
-A fast, minimal image viewer for Linux with vim keybindings, built with Go and [Fyne](https://fyne.io).
+A fast, minimal image viewer for Linux with vim keybindings, built with C and [SDL3](https://wiki.libsdl.org/SDL3).
 
 ![Frame Icon](assets/frame.svg)
 
@@ -10,21 +10,21 @@ A fast, minimal image viewer for Linux with vim keybindings, built with Go and [
 - **Vim Keybindings** — Navigate images using familiar vim keys
 - **Image Operations** — Delete, rotate, rename images
 - **Image Info** — View dimensions, file size, format, and EXIF data
-- **Dark Theme** — Easy on the eyes
+- **Dark Background** — Easy on the eyes
+- **Zoom & Pan** — Mouse wheel zoom, click-and-drag panning
 - **Format Support** — JPEG, PNG, GIF (animated), APNG (animated), WebP, BMP, TIFF, ICO
+- **Wayland + X11** — Runs natively on both via SDL3
 
 ## Installation
 
 ### Nix (Recommended)
 
 **Run directly:**
-
 ```bash
 nix run github:Hy4ri/frame -- /path/to/image.jpg
 ```
 
 **Add to your system (NixOS):**
-
 ```nix
 # flake.nix
 {
@@ -44,11 +44,15 @@ environment.systemPackages = [ pkgs.frame ];
 ```bash
 # With Nix
 nix develop
-go build -o frame .
+meson setup build
+ninja -C build
 
-# Without Nix (requires OpenGL/X11 dev libraries)
-go build -o frame .
+# Without Nix (requires SDL3 dev libraries)
+meson setup build
+ninja -C build
 ```
+
+Dependencies: SDL3, SDL3_image, SDL3_ttf, libexif, zenity (for dialogs).
 
 ## Usage
 
@@ -58,9 +62,6 @@ frame /path/to/image.jpg
 
 # Open a directory (view all images)
 frame /path/to/images/
-
-# Open file chooser
-frame
 ```
 
 ## Keybindings
@@ -76,10 +77,12 @@ frame
 | `gg` | First image |
 | `G` | Last image |
 | `f` | Toggle fullscreen |
-| `+` / `=` | Zoom in |
-| `-` | Zoom out |
+| `+` / `=` / `z` | Zoom in |
+| `-` / `x` | Zoom out |
 | `0` | Fit to window |
 | `1` | Original size (1:1) |
+| `Scroll` | Zoom in/out |
+| `Drag` | Pan image |
 
 ### Image Operations
 

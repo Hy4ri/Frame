@@ -28,6 +28,17 @@
           libexif
         ];
 
+        # zenity is needed at runtime for dialogs (delete confirm, rename)
+        propagatedBuildInputs = with pkgs; [
+          zenity
+        ];
+
+        # Install desktop file
+        postInstall = ''
+          mkdir -p $out/share/applications
+          cp ${./frame.desktop} $out/share/applications/frame.desktop
+        '';
+
         meta = with pkgs.lib; {
           description = "A minimal image viewer for Linux with vim keybindings";
           homepage = "https://github.com/Hy4ri/frame";
@@ -50,6 +61,7 @@
           sdl3-ttf
           libexif
           clang-tools
+          zenity
         ];
 
         shellHook = ''

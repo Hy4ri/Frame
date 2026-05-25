@@ -28,11 +28,6 @@
           libexif
         ];
 
-        # zenity is needed at runtime for dialogs (delete confirm, rename)
-        propagatedBuildInputs = with pkgs; [
-          zenity
-        ];
-
         # Install desktop file
         postInstall = ''
           mkdir -p $out/share/applications
@@ -61,7 +56,6 @@
           sdl3-ttf
           libexif
           clang-tools
-          zenity
         ];
 
         shellHook = ''

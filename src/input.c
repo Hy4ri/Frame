@@ -57,46 +57,11 @@ static void do_nav(struct AppState *app, struct Viewer *viewer, SDL_Window *wind
     prefetch_around(app, viewer);
 }
 
-/* Run zenity --question for delete confirmation. Returns true if confirmed. */
-static bool zenity_confirm(const char *title, const char *text, const char *ok_label) {
-    char cmd[1024];
-    int ret = snprintf(cmd, sizeof(cmd),
-        "zenity --question --title=\"%s\" --text=\"%s\" "
-        "--ok-label=\"%s\" --cancel-label=\"Cancel\" 2>/dev/null",
-        title, text, ok_label);
-    if (ret < 0 || (size_t)ret >= sizeof(cmd)) return false;
-    FILE *fp = popen(cmd, "r");
-    if (!fp) return false;
-    int status = pclose(fp);
-    return (status == 0);
-}
-
-/* Run zenity --entry for rename. Returns dynamically allocated string, or NULL. */
-static char *zenity_entry(const char *title, const char *text, const char *default_text) {
-    char cmd[4096];
-    int ret = snprintf(cmd, sizeof(cmd),
-        "zenity --entry --title=\"%s\" --text=\"%s\" "
-        "--entry-text=\"%s\" 2>/dev/null",
-        title, text, default_text);
-    if (ret < 0 || (size_t)ret >= sizeof(cmd)) return NULL;
-    FILE *fp = popen(cmd, "r");
-    if (!fp) return NULL;
-    char buf[1024];
-    if (!fgets(buf, sizeof(buf), fp)) {
-        pclose(fp);
-        return NULL;
-    }
-    pclose(fp);
-    size_t len = strlen(buf);
-    if (len > 0 && buf[len - 1] == '\n') buf[len - 1] = '\0';
-    if (buf[0] == '\0') return NULL;
-    return strdup(buf);
-}
-
 /* --- Main handler --- */
 
 bool input_handle_keyboard(struct AppState *app, struct Viewer *viewer,
-                           const SDL_KeyboardEvent *event, SDL_Window *window) {
+                           const SDL_KeyboardEvent *event,
+                           SDL_Window *window, SDL_Renderer *renderer) {
     SDL_Keycode key = event->key;
     bool shift = (event->mod & SDL_KMOD_SHIFT) != 0;
 
@@ -201,7 +166,7 @@ bool input_handle_keyboard(struct AppState *app, struct Viewer *viewer,
         int ret = snprintf(msg, sizeof(msg), "Move \"%s\" to trash?", name);
         if (ret < 0 || (size_t)ret >= sizeof(msg)) goto reset_gg;
 
-        if (!zenity_confirm("Delete Image", msg, "Move to Trash")) {
+        if (!overlay_modal_confirm("Delete Image", msg, renderer)) {
             goto reset_gg;
         }
 
@@ -239,7 +204,7 @@ bool input_handle_keyboard(struct AppState *app, struct Viewer *viewer,
         const char *name = strrchr(path, '/');
         name = name ? name + 1 : path;
 
-        char *new_name = zenity_entry("Rename Image", "New name:", name);
+        char *new_name = overlay_modal_entry("Rename Image", name, renderer, window);
         if (!new_name) goto reset_gg;
 
         /* Validate name */

@@ -94,7 +94,7 @@ int main(int argc, char *argv[]) {
                 break;
 
             case SDL_EVENT_KEY_DOWN:
-                running = input_handle_keyboard(app, viewer, &event.key, window);
+                running = input_handle_keyboard(app, viewer, &event.key, window, renderer);
                 break;
 
             case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:

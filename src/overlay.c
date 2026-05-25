@@ -25,6 +25,10 @@ static char *current_title = NULL;
 static char *current_body = NULL;
 static int viewport_w = 0, viewport_h = 0;
 
+/* For entry dialog */
+static char entry_buffer[512] = {0};  /* text being edited */
+static int entry_cursor = 0;          /* cursor position (not visually rendered, just logical) */
+
 bool overlay_init(void)
 {
     if (!TTF_Init()) {
@@ -56,6 +60,177 @@ bool overlay_init(void)
     return true;
 }
 
+/* ================================================================
+   Confirm dialog
+   ================================================================ */
+
+bool overlay_modal_confirm(const char *title_text, const char *message,
+                           SDL_Renderer *renderer) {
+    if (!body_font || !title_font) {
+        /* No fonts loaded — can't render dialog. Default to cancel. */
+        return false;
+    }
+
+    /* Build full text: message + hint */
+    char full_text[2048];
+    snprintf(full_text, sizeof(full_text), "%s\n\n[Enter] Confirm    [Esc] Cancel",
+             message ? message : "");
+
+    overlay_show_info(title_text ? title_text : "Confirm", full_text);
+    active = true;
+
+    /* Inner event loop — block until user dismisses */
+    SDL_Event e;
+    while (active) {
+        while (SDL_PollEvent(&e)) {
+            switch (e.type) {
+            case SDL_EVENT_QUIT:
+                overlay_hide();
+                return false;
+
+            case SDL_EVENT_KEY_DOWN:
+                switch (e.key.key) {
+                case SDLK_RETURN:
+                case SDLK_KP_ENTER:
+                    overlay_hide();
+                    return true;
+                case SDLK_ESCAPE:
+                    overlay_hide();
+                    return false;
+                default:
+                    break;
+                }
+                break;
+
+            default:
+                break;
+            }
+        }
+
+        /* Render the overlay on top of the current frame */
+        overlay_render(renderer);
+        SDL_RenderPresent(renderer);
+        SDL_Delay(8);
+    }
+
+    return false;
+}
+
+/* ================================================================
+   Entry dialog
+   ================================================================ */
+
+/* Build the entry display text from the current buffer */
+static void build_entry_display_text(char *out, int out_size) {
+    snprintf(out, out_size, "%s\n\n[Enter] Confirm    [Esc] Cancel",
+             entry_buffer[0] ? entry_buffer : " ");
+}
+
+char *overlay_modal_entry(const char *title_text, const char *initial_text,
+                          SDL_Renderer *renderer, SDL_Window *window) {
+    if (!body_font || !title_font) {
+        return NULL;
+    }
+
+    /* Initialize entry buffer */
+    if (initial_text) {
+        strncpy(entry_buffer, initial_text, sizeof(entry_buffer) - 1);
+    } else {
+        entry_buffer[0] = '\0';
+    }
+    entry_cursor = strlen(entry_buffer);
+    entry_buffer[sizeof(entry_buffer) - 1] = '\0';
+
+    /* Show initial state */
+    char display[2048];
+    build_entry_display_text(display, sizeof(display));
+    overlay_show_info(title_text ? title_text : "Enter Text", display);
+    active = true;
+
+    /* Start text input for SDL_EVENT_TEXT_INPUT events */
+    SDL_StartTextInput(window);
+
+    /* Inner event loop */
+    SDL_Event e;
+    while (active) {
+        while (SDL_PollEvent(&e)) {
+            switch (e.type) {
+            case SDL_EVENT_QUIT:
+                SDL_StopTextInput(window);
+                overlay_hide();
+                return NULL;
+
+            case SDL_EVENT_TEXT_INPUT:
+                /* Append typed text to buffer */
+                {
+                    const char *text = e.text.text;
+                    int text_len = strlen(text);
+                    int buf_len = strlen(entry_buffer);
+                    int remaining = (int)sizeof(entry_buffer) - buf_len - 1;
+                    if (remaining > 0) {
+                        int to_copy = text_len < remaining ? text_len : remaining;
+                        memcpy(entry_buffer + buf_len, text, to_copy);
+                        entry_buffer[buf_len + to_copy] = '\0';
+                        entry_cursor = strlen(entry_buffer);
+                    }
+                    /* Refresh display */
+                    build_entry_display_text(display, sizeof(display));
+                    overlay_show_info(title_text ? title_text : "Enter Text", display);
+                }
+                break;
+
+            case SDL_EVENT_KEY_DOWN:
+                switch (e.key.key) {
+                case SDLK_RETURN:
+                case SDLK_KP_ENTER:
+                    if (entry_buffer[0] != '\0') {
+                        char *result = strdup(entry_buffer);
+                        SDL_StopTextInput(window);
+                        overlay_hide();
+                        return result;
+                    }
+                    /* If empty, treat as cancel */
+                    SDL_StopTextInput(window);
+                    overlay_hide();
+                    return NULL;
+
+                case SDLK_ESCAPE:
+                    SDL_StopTextInput(window);
+                    overlay_hide();
+                    return NULL;
+
+                case SDLK_BACKSPACE:
+                    {
+                        int len = strlen(entry_buffer);
+                        if (len > 0) {
+                            entry_buffer[len - 1] = '\0';
+                            entry_cursor = len - 1;
+                            build_entry_display_text(display, sizeof(display));
+                            overlay_show_info(title_text ? title_text : "Enter Text", display);
+                        }
+                    }
+                    break;
+
+                default:
+                    break;
+                }
+                break;
+
+            default:
+                break;
+            }
+        }
+
+        /* Render */
+        overlay_render(renderer);
+        SDL_RenderPresent(renderer);
+        SDL_Delay(8);
+    }
+
+    SDL_StopTextInput(window);
+    return NULL;
+}
+
 void overlay_shutdown(void)
 {
     overlay_hide();
@@ -67,6 +242,10 @@ void overlay_shutdown(void)
 }
 
 bool overlay_is_active(void) { return active; }
+
+bool overlay_is_available(void) {
+    return (body_font != NULL);
+}
 
 void overlay_hide(void)
 {

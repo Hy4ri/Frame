@@ -11,7 +11,8 @@ struct Viewer;
    Handles ALL keybindings: vim nav, zoom, rotate, delete, rename, info, help.
    Also handles 'gg' double-tap timing internally. */
 bool input_handle_keyboard(struct AppState *app, struct Viewer *viewer,
-                           const SDL_KeyboardEvent *event, SDL_Window *window);
+                           const SDL_KeyboardEvent *event,
+                           SDL_Window *window, SDL_Renderer *renderer);
 
 /* Reset the 'gg' sequence state (e.g., when app loses focus). */
 void input_reset_gg(void);

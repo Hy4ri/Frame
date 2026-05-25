@@ -26,6 +26,10 @@ __debug_bin*
 .DS_Store
 Thumbs.db
 
+# Build artifacts
+build/
+*.o
+
 # Nix
 result
 result-*

@@ -259,7 +259,7 @@ Frame uses **Meson** as the primary build system with a **Makefile** as an alter
 ### Meson (`meson.build`)
 
 ```python
-project('frame', 'c', version: '0.9.0', default_options: ['c_std=c11'])
+    project('frame', 'c', version: '1.0.0', default_options: ['c_std=c11'])
 ```
 
 Dependencies: `sdl3`, `sdl3-image`, `sdl3-ttf`, `libexif`, `threads`, `math`

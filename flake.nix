@@ -12,7 +12,7 @@
     in {
       packages.default = pkgs.stdenv.mkDerivation {
         pname = "frame";
-        version = "0.9.0";
+        version = "1.0.0";
         src = ./.;
 
         nativeBuildInputs = with pkgs; [

@@ -9,7 +9,7 @@
 <div align="center">
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](meson.build)
+[![Version](https://img.shields.io/badge/version-1.1.0-green.svg)](meson.build)
 [![Platform](https://img.shields.io/badge/platform-Linux-lightgrey)](https://github.com/Hy4ri/frame)
 [![SDL3](https://img.shields.io/badge/SDL3-powered-orange)](https://wiki.libsdl.org/SDL3)
 

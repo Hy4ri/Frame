@@ -5,6 +5,15 @@ All notable changes to Frame will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-05-30
+
+### Changed
+
+- **Nix flake: drastically reduced closure size** — 999 MiB → 343 MiB (66% smaller)
+  - Disabled audio backends (PipeWire, PulseAudio, JACK, ALSA, sndio) — Frame is an image viewer
+  - Disabled camera, Bluetooth, zenity/GTK dialogs, and other unnecessary SDL3 subsystems
+  - Trimmed SDL3 dependency closure by ~656 MiB
+
 ## [1.0.0] - 2026-05-25
 
 ### Added

@@ -8,11 +8,14 @@
 
   outputs = { self, nixpkgs, flake-utils }:
     flake-utils.lib.eachDefaultSystem (system: let
-      pkgs = nixpkgs.legacyPackages.${system};
+      pkgs = import nixpkgs {
+        inherit system;
+        overlays = [ self.overlays.default ];
+      };
     in {
       packages.default = pkgs.stdenv.mkDerivation {
         pname = "frame";
-        version = "1.0.0";
+        version = "1.1.0";
         src = ./.;
 
         nativeBuildInputs = with pkgs; [
@@ -22,9 +25,9 @@
         ];
 
         buildInputs = with pkgs; [
-          sdl3
-          sdl3-image
-          sdl3-ttf
+          sdl3-trimmed
+          sdl3-image-trimmed
+          sdl3-ttf-trimmed
           libexif
         ];
 
@@ -66,8 +69,47 @@
       };
     })
     // {
-      # Overlay for NixOS integration
+      # Overlay providing trimmed SDL3 packages for Frame
       overlays.default = final: prev: {
+        # Trimmed SDL3 — only what Frame actually needs (no audio, camera, BT, dialogs, etc.)
+        sdl3-trimmed = (prev.sdl3.override {
+          # Audio — Frame is an image viewer, no audio needed
+          alsaSupport = false;
+          pipewireSupport = false;
+          pulseaudioSupport = false;
+          jackSupport = false;
+          sndioSupport = false;
+          # Input methods — not needed
+          ibusSupport = false;
+          # System tray — not needed
+          traySupport = false;
+          # USB HID — keyboard/mouse handled by SDL's own input layer
+          libusbSupport = false;
+          # Vulkan — OpenGL is sufficient for 2D image rendering
+          vulkanSupport = false;
+        }).overrideAttrs (old: {
+          # Tests expect audio/input subsystems that we disabled — skip them
+          doCheck = false;
+          # Remove zenity from postPatch — Frame never shows file dialogs or message boxes.
+          # Zenity pulls in GTK4 → gst-plugins-bad → ~918 MiB of unnecessary closure.
+          postPatch = let
+            lib = final.lib;
+            lines = lib.strings.splitString "\n" old.postPatch;
+            filtered = builtins.filter (
+              line: !lib.strings.hasInfix "zenity" line
+            ) lines;
+          in lib.strings.concatStringsSep "\n" filtered;
+        });
+
+        # Use the trimmed SDL3 for sdl3-image and sdl3-ttf too
+        sdl3-image-trimmed = prev.sdl3-image.override {
+          sdl3 = final.sdl3-trimmed;
+        };
+
+        sdl3-ttf-trimmed = prev.sdl3-ttf.override {
+          sdl3 = final.sdl3-trimmed;
+        };
+
         frame = self.packages.${prev.stdenv.hostPlatform.system}.default;
       };
     };

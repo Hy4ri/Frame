@@ -2,7 +2,7 @@ CC = gcc
 CFLAGS = -std=c11 -Wall -Wextra -O2 $(shell pkg-config --cflags sdl3 sdl3-image sdl3-ttf libexif)
 LDFLAGS = $(shell pkg-config --libs sdl3 sdl3-image sdl3-ttf libexif) -lm -lpthread
 
-SRCS = src/main.c src/utils.c src/app.c src/fileops.c src/loader.c src/cache.c src/viewer.c src/input.c src/overlay.c src/anim.c src/exif.c
+SRCS = src/main.c src/utils.c src/app.c src/fileops.c src/loader.c src/cache.c src/viewer.c src/input.c src/overlay.c src/anim.c src/exif.c src/prefetch.c
 OBJS = $(SRCS:.c=.o)
 TARGET = frame
 

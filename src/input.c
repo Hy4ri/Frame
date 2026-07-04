@@ -26,19 +26,7 @@ void input_reset_gg(void) {
 
 /* --- Keybinding action helpers --- */
 
-/* Prefetch adjacent images into the LRU cache for instant navigation */
-static void prefetch_around(struct AppState *app, struct Viewer *viewer) {
-    int center = app_current_index(app) - 1; /* 0-based */
-    int offsets[] = {1, 2, 3, -1, -2, -3};
-    int count = app_image_count(app);
-
-    for (int i = 0; i < 6; i++) {
-        int idx = center + offsets[i];
-        if (idx >= 0 && idx < count) {
-            viewer_prefetch(viewer, app_image_path(app, idx));
-        }
-    }
-}
+/* Prefetch is now handled asynchronously via viewer_prefetch_around(). */
 
 /* Navigate, reload image, update title, and prefetch neighbors */
 static void do_nav(struct AppState *app, struct Viewer *viewer, SDL_Window *window) {
@@ -54,7 +42,7 @@ static void do_nav(struct AppState *app, struct Viewer *viewer, SDL_Window *wind
              name, app_current_index(app), app_image_count(app));
     SDL_SetWindowTitle(window, title);
 
-    prefetch_around(app, viewer);
+    viewer_prefetch_around(viewer, app);
 }
 
 /* --- Main handler --- */
@@ -189,7 +177,7 @@ bool input_handle_keyboard(struct AppState *app, struct Viewer *viewer,
             snprintf(title, sizeof(title), "%s (%d/%d) - Frame",
                      name, app_current_index(app), app_image_count(app));
             SDL_SetWindowTitle(window, title);
-            prefetch_around(app, viewer);
+            viewer_prefetch_around(viewer, app);
         } else {
             SDL_SetWindowTitle(window, "Frame");
         }

@@ -29,6 +29,7 @@ sources = [
   'src/overlay.c',
   'src/anim.c',
   'src/exif.c',
+  'src/prefetch.c',
 ]
 
 executable('frame',

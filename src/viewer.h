@@ -5,6 +5,7 @@
 #include <stdbool.h>
 
 typedef struct Viewer Viewer;
+struct AppState;
 
 /* Maximum image dimension to prevent OOM */
 #define VIEWER_MAX_DIMENSION 16384
@@ -28,8 +29,12 @@ void viewer_render(Viewer *v, SDL_Renderer *renderer);
 /* Notify viewer that the window was resized (for fit recalculation). */
 void viewer_handle_resize(Viewer *v, int new_w, int new_h);
 
-/* Prefetch an adjacent image into the cache (non-blocking). */
+/* Legacy single-path prefetch (synchronous, kept for compatibility). */
 void viewer_prefetch(Viewer *v, const char *path);
+
+/* Submit the ±5 neighbourhood around the current image for background
+   prefetching.  Call after every navigation or deletion. */
+void viewer_prefetch_around(Viewer *v, struct AppState *app);
 
 /* --- Zoom --- */
 void viewer_zoom_in(Viewer *v);       /* +5% from center */

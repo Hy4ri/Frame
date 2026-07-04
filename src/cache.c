@@ -5,7 +5,7 @@
 #include <string.h>
 #include <pthread.h>
 
-#define MAX_CACHE_CAPACITY 100  // sanity limit
+#define MAX_CACHE_CAPACITY 200  // sanity limit
 
 typedef struct {
     char *path;

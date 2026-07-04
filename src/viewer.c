@@ -1,7 +1,9 @@
 #include "viewer.h"
 #include "loader.h"
 #include "cache.h"
+#include "prefetch.h"
 #include "anim.h"
+#include "app.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -34,6 +36,7 @@ struct Viewer {
 
     /* Cache for prefetching */
     struct ImageCache *cache;
+    struct Prefetcher *prefetcher;
 };
 
 /* ---- internal helpers ---- */
@@ -175,7 +178,8 @@ Viewer *viewer_create(SDL_Renderer *renderer)
     v->needs_fit = true;
     v->offset_x = 0.0f;
     v->offset_y = 0.0f;
-    v->cache = cache_create(10);
+    v->cache = cache_create(50);
+    v->prefetcher = prefetch_create(v->cache);
     return v;
 }
 
@@ -183,6 +187,7 @@ void viewer_destroy(Viewer *v)
 {
     if (!v) return;
     viewer_clear(v);
+    prefetch_destroy(v->prefetcher);
     cache_destroy(v->cache);
     free(v);
 }
@@ -328,12 +333,37 @@ void viewer_handle_resize(Viewer *v, int new_w, int new_h)
 
 void viewer_prefetch(Viewer *v, const char *path)
 {
-    if (!v || !path) return;
-    if (cache_get(v->cache, path)) return; /* already cached */
-    SDL_Surface *s = loader_load_static(path);
-    if (s) {
-        cache_put(v->cache, path, s); /* cache takes ownership */
+    /* Legacy synchronous prefetch — now a no-op.
+       Background prefetching is handled by viewer_prefetch_around(). */
+    (void)v;
+    (void)path;
+}
+
+void viewer_prefetch_around(Viewer *v, struct AppState *app)
+{
+    if (!v || !app || !v->prefetcher) return;
+
+    int count = app_image_count(app);
+    if (count <= 1) return;
+
+    int center = app_current_index(app) - 1; /* convert 1-based to 0-based */
+
+    /* Build nearest-first list: +1, -1, +2, -2, … +5, -5 */
+    const char *paths[10];
+    int n = 0;
+
+    for (int d = 1; d <= 5; d++) {
+        int fwd = center + d;
+        if (fwd >= 0 && fwd < count)
+            paths[n++] = app_image_path(app, fwd);
+
+        int bwd = center - d;
+        if (bwd >= 0 && bwd < count)
+            paths[n++] = app_image_path(app, bwd);
     }
+
+    if (n > 0)
+        prefetch_submit(v->prefetcher, paths, n);
 }
 
 /* ---- Zoom ---- */

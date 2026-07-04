@@ -51,6 +51,16 @@ SDL_Surface *loader_load_static(const char *path)
         fprintf(stderr, "IMG_Load failed for '%s': %s\n", path, SDL_GetError());
         return NULL;
     }
+
+    /* Convert all loaded surfaces to RGBA8888 to ensure GPU texture compatibility
+       (e.g. for indexed colormap PNGs) and uniform format reuse. */
+    if (surface->format != SDL_PIXELFORMAT_RGBA8888) {
+        SDL_Surface *converted = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA8888);
+        if (converted) {
+            SDL_DestroySurface(surface);
+            surface = converted;
+        }
+    }
     return surface;
 }
 

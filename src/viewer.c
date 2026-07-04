@@ -38,6 +38,10 @@ struct Viewer {
     /* Cache for prefetching */
     struct ImageCache *cache;
     struct Prefetcher *prefetcher;
+
+    /* Texture reuse size/format tracking */
+    int texture_w, texture_h;
+    SDL_PixelFormat texture_format;
 };
 
 /* ---- internal helpers ---- */
@@ -117,31 +121,58 @@ static SDL_Surface *rotate_surface(SDL_Surface *src, int degrees)
     return dst;
 }
 
+static void update_texture_from_surface(Viewer *v, SDL_Surface *surface)
+{
+    if (!v || !surface) return;
+
+    if (v->texture && v->texture_w == surface->w && v->texture_h == surface->h && v->texture_format == surface->format) {
+        SDL_UpdateTexture(v->texture, NULL, surface->pixels, surface->pitch);
+    } else {
+        if (v->texture) {
+            SDL_DestroyTexture(v->texture);
+            v->texture = NULL;
+        }
+
+        v->texture = SDL_CreateTexture(v->renderer, surface->format, SDL_TEXTUREACCESS_STATIC, surface->w, surface->h);
+        if (v->texture) {
+            v->texture_w = surface->w;
+            v->texture_h = surface->h;
+            v->texture_format = surface->format;
+            SDL_UpdateTexture(v->texture, NULL, surface->pixels, surface->pitch);
+            SDL_SetTextureScaleMode(v->texture, SDL_SCALEMODE_LINEAR);
+        } else {
+            v->texture_w = 0;
+            v->texture_h = 0;
+            v->texture_format = SDL_PIXELFORMAT_UNKNOWN;
+        }
+    }
+}
+
 /* Create the rotated surface and upload to a texture.
-   Frees old rotated surface and texture first. */
+   Frees old rotated surface first. Reuses the texture if size/format matches. */
 static void viewer_apply_rotation(Viewer *v)
 {
     SDL_DestroySurface(v->rotated);
-    SDL_DestroyTexture(v->texture);
     v->rotated = NULL;
-    v->texture = NULL;
 
     if (!v->original) {
+        if (v->texture) {
+            SDL_DestroyTexture(v->texture);
+            v->texture = NULL;
+            v->texture_w = 0;
+            v->texture_h = 0;
+            v->texture_format = SDL_PIXELFORMAT_UNKNOWN;
+        }
         return;
     }
 
     if (v->rotation_degrees == 0) {
-        /* No rotation needed: upload original directly */
-        v->texture = SDL_CreateTextureFromSurface(v->renderer, v->original);
+        update_texture_from_surface(v, v->original);
     } else {
         v->rotated = rotate_surface(v->original, v->rotation_degrees);
         if (v->rotated) {
-            v->texture = SDL_CreateTextureFromSurface(v->renderer, v->rotated);
+            update_texture_from_surface(v, v->rotated);
         }
-    }
-
-    if (v->texture) {
-        SDL_SetTextureScaleMode(v->texture, SDL_SCALEMODE_LINEAR);
     }
 }
 
@@ -214,14 +245,12 @@ void viewer_load_image(Viewer *v, const char *path)
     v->offset_y = 0.0f;
     v->needs_fit = true;
 
-    /* Free old surfaces and texture */
+    /* Free old surfaces, keeping texture for reuse */
     SDL_DestroySurface(v->rotated);
-    SDL_DestroyTexture(v->texture);
     if (v->owns_original && v->original) {
         SDL_DestroySurface(v->original);
     }
     v->rotated = NULL;
-    v->texture = NULL;
     v->original = NULL;
     v->owns_original = false;
 
@@ -258,7 +287,10 @@ void viewer_load_image(Viewer *v, const char *path)
     } else {
         /* Cache miss — load from file */
         v->original = loader_load_static(path);
-        if (!v->original) return;
+        if (!v->original) {
+            viewer_clear(v);
+            return;
+        }
         v->owns_original = true;
 
         /* Put into cache only if another thread hasn't cached it in the meantime.
@@ -297,6 +329,9 @@ void viewer_clear(Viewer *v)
     cache_pin(v->cache, NULL);
     SDL_DestroyTexture(v->texture);
     v->texture = NULL;
+    v->texture_w = 0;
+    v->texture_h = 0;
+    v->texture_format = SDL_PIXELFORMAT_UNKNOWN;
     if (v->owns_original && v->original) {
         SDL_DestroySurface(v->original);
     }

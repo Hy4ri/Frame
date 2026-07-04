@@ -15,11 +15,11 @@
     in {
       packages.default = pkgs.stdenv.mkDerivation rec {
         pname = "frame";
-        version = "1.3.0";
+        version = "1.3.1";
 
         src = pkgs.fetchzip {
           url = "https://github.com/Hy4ri/Frame/releases/download/v${version}/frame-linux-x86_64.tar.gz";
-          hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+          hash = "sha256-eSKVZ08C34vTR76x3qPPRtsbB5QPQwVqMwW1+ucKYUg=";
         };
 
         nativeBuildInputs = with pkgs; [

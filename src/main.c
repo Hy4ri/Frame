@@ -85,68 +85,82 @@ int main(int argc, char *argv[]) {
     /* Main event loop */
     SDL_Event event;
     bool running = true;
+    bool dirty = true;
 
     while (running) {
-        while (SDL_PollEvent(&event)) {
-            switch (event.type) {
-            case SDL_EVENT_QUIT:
-                running = false;
-                break;
+        int timeout_ms = viewer_is_animated(viewer) ? 10 : 250;
 
-            case SDL_EVENT_KEY_DOWN:
-                running = input_handle_keyboard(app, viewer, &event.key, window, renderer);
-                break;
+        if (SDL_WaitEventTimeout(&event, timeout_ms)) {
+            do {
+                switch (event.type) {
+                case SDL_EVENT_QUIT:
+                    running = false;
+                    break;
 
-            case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-                viewer_handle_resize(viewer,
-                    (int)event.window.data1, (int)event.window.data2);
-                break;
+                case SDL_EVENT_KEY_DOWN:
+                    running = input_handle_keyboard(app, viewer, &event.key, window, renderer);
+                    dirty = true;
+                    break;
 
-            case SDL_EVENT_MOUSE_BUTTON_DOWN:
-                if (event.button.button == SDL_BUTTON_LEFT) {
-                    viewer_begin_drag(viewer);
-                    dragging = true;
+                case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+                    viewer_handle_resize(viewer,
+                        (int)event.window.data1, (int)event.window.data2);
+                    dirty = true;
+                    break;
+
+                case SDL_EVENT_WINDOW_EXPOSED:
+                    dirty = true;
+                    break;
+
+                case SDL_EVENT_MOUSE_BUTTON_DOWN:
+                    if (event.button.button == SDL_BUTTON_LEFT) {
+                        viewer_begin_drag(viewer);
+                        dragging = true;
+                    }
+                    dirty = true;
+                    break;
+
+                case SDL_EVENT_MOUSE_BUTTON_UP:
+                    if (event.button.button == SDL_BUTTON_LEFT) {
+                        viewer_end_drag(viewer);
+                        dragging = false;
+                    }
+                    dirty = true;
+                    break;
+
+                case SDL_EVENT_MOUSE_MOTION:
+                    mouse_x = event.motion.x;
+                    mouse_y = event.motion.y;
+                    if (dragging) {
+                        viewer_do_drag(viewer, event.motion.xrel, event.motion.yrel);
+                        dirty = true;
+                    }
+                    break;
+
+                case SDL_EVENT_MOUSE_WHEEL:
+                    viewer_scroll_zoom(viewer, mouse_x, mouse_y,
+                                        event.wheel.y);
+                    dirty = true;
+                    break;
+
+                default:
+                    break;
                 }
-                break;
-
-            case SDL_EVENT_MOUSE_BUTTON_UP:
-                if (event.button.button == SDL_BUTTON_LEFT) {
-                    viewer_end_drag(viewer);
-                    dragging = false;
-                }
-                break;
-
-            case SDL_EVENT_MOUSE_MOTION:
-                mouse_x = event.motion.x;
-                mouse_y = event.motion.y;
-                if (dragging) {
-                    viewer_do_drag(viewer, event.motion.xrel, event.motion.yrel);
-                }
-                break;
-
-            case SDL_EVENT_MOUSE_WHEEL:
-                viewer_scroll_zoom(viewer, mouse_x, mouse_y,
-                                    event.wheel.y);
-                break;
-
-            default:
-                break;
-            }
+            } while (SDL_PollEvent(&event));
         }
 
         /* Advance animation frames */
-        viewer_animation_tick(viewer);
+        if (viewer_animation_tick(viewer)) {
+            dirty = true;
+        }
 
-        /* Render current frame */
-        viewer_render(viewer, renderer);
-
-        /* Render overlay on top */
-        overlay_render(renderer);
-
-        SDL_RenderPresent(renderer);
-
-        /* Small sleep to avoid 100% CPU */
-        SDL_Delay(8);  /* ~120 FPS cap */
+        /* Render only if state is dirty */
+        if (dirty && running) {
+            viewer_render(viewer, renderer);
+            overlay_render(renderer);
+            SDL_RenderPresent(renderer);
+            dirty = false;
+        }
     }
 
     /* Cleanup */

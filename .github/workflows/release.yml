@@ -71,7 +71,7 @@ jobs:
           git clone --depth 1 https://github.com/libsdl-org/SDL.git -b main
           cd SDL
           mkdir build && cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DSDL_STATIC=OFF -DSDL_SHARED=ON
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DSDL_STATIC=OFF -DSDL_SHARED=ON -DSDL_X11_XSCRNSAVER=OFF
           make -j$(nproc)
           sudo make install
 

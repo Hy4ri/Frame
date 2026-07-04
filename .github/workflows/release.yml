@@ -119,9 +119,14 @@ jobs:
           cp LICENSE dist/
           tar -czvf frame-linux-x86_64.tar.gz -C dist .
 
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v4
+
       - name: Calculate Tarball Hash and Update Flake
         run: |
-          HASH="sha256-$(openssl dgst -sha256 -binary frame-linux-x86_64.tar.gz | openssl base64)"
+          mkdir -p temp_unpack
+          tar -xf frame-linux-x86_64.tar.gz -C temp_unpack
+          HASH=$(nix hash path temp_unpack)
           echo "Calculated SRI Hash: $HASH"
 
           # Configure git

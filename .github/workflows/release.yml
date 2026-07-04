@@ -66,35 +66,47 @@ jobs:
             libudev-dev \
             cmake
 
+      - name: Cache SDL3 Build
+        id: cache-sdl
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/sdl_install
+          key: sdl3-build-cache-v2
+
       - name: Compile and Install SDL3
+        if: steps.cache-sdl.outputs.cache-hit != 'true'
         run: |
           git clone --depth 1 https://github.com/libsdl-org/SDL.git -b main
           cd SDL
           mkdir build && cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DSDL_STATIC=OFF -DSDL_SHARED=ON -DSDL_X11_XSCRNSAVER=OFF -DSDL_X11_XTEST=OFF
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/sdl_install -DSDL_STATIC=OFF -DSDL_SHARED=ON -DSDL_X11_XSCRNSAVER=OFF -DSDL_X11_XTEST=OFF
           make -j$(nproc)
-          sudo make install
+          make install
 
       - name: Compile and Install SDL3_image
+        if: steps.cache-sdl.outputs.cache-hit != 'true'
         run: |
           git clone --depth 1 https://github.com/libsdl-org/SDL_image.git -b main
           cd SDL_image
           mkdir build && cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/sdl_install
           make -j$(nproc)
-          sudo make install
+          make install
 
       - name: Compile and Install SDL3_ttf
+        if: steps.cache-sdl.outputs.cache-hit != 'true'
         run: |
           git clone --depth 1 https://github.com/libsdl-org/SDL_ttf.git -b main
           cd SDL_ttf
           mkdir build && cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/sdl_install
           make -j$(nproc)
-          sudo make install
+          make install
 
       - name: Configure with Meson
         run: meson setup build --buildtype=release
+        env:
+          PKG_CONFIG_PATH: ${{ github.workspace }}/sdl_install/lib/pkgconfig:${{ github.workspace }}/sdl_install/lib/x86_64-linux-gnu/pkgconfig
 
       - name: Compile Frame
         run: meson compile -C build

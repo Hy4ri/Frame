@@ -13,28 +13,36 @@
         overlays = [ self.overlays.default ];
       };
     in {
-      packages.default = pkgs.stdenv.mkDerivation {
+      packages.default = pkgs.stdenv.mkDerivation rec {
         pname = "frame";
-        version = "1.1.0";
-        src = ./.;
+        version = "1.3.0";
+
+        src = pkgs.fetchzip {
+          url = "https://github.com/Hy4ri/Frame/releases/download/v${version}/frame-linux-x86_64.tar.gz";
+          hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        };
 
         nativeBuildInputs = with pkgs; [
-          meson
-          ninja
-          pkg-config
+          autoPatchelfHook
         ];
 
         buildInputs = with pkgs; [
-          sdl3-trimmed
-          sdl3-image-trimmed
-          sdl3-ttf-trimmed
+          sdl3
+          sdl3-image
+          sdl3-ttf
           libexif
+          stdenv.cc.cc.lib
         ];
 
-        # Install desktop file
-        postInstall = ''
+        dontConfigure = true;
+        dontBuild = true;
+
+        installPhase = ''
+          mkdir -p $out/bin
+          cp frame $out/bin/
+
           mkdir -p $out/share/applications
-          cp ${./frame.desktop} $out/share/applications/frame.desktop
+          cp frame.desktop $out/share/applications/frame.desktop
         '';
 
         meta = with pkgs.lib; {

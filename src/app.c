@@ -97,9 +97,18 @@ void app_destroy(AppState *app) {
 void app_load_directory(AppState *app, const char *path) {
     if (!app || !path) return;
 
+    /* Resolve to an absolute canonical path so relative paths like "image3.png"
+       match the full paths we build during directory scanning. */
+    char *resolved = realpath(path, NULL);
+    if (!resolved) {
+        fprintf(stderr, "app_load_directory: cannot resolve '%s'\n", path);
+        return;
+    }
+
     struct stat path_stat;
-    if (stat(path, &path_stat) != 0) {
-        fprintf(stderr, "app_load_directory: cannot stat '%s'\n", path);
+    if (stat(resolved, &path_stat) != 0) {
+        fprintf(stderr, "app_load_directory: cannot stat '%s'\n", resolved);
+        free(resolved);
         return;
     }
 
@@ -108,21 +117,25 @@ void app_load_directory(AppState *app, const char *path) {
 
     if (S_ISDIR(path_stat.st_mode)) {
         /* path is a directory */
-        dir = strdup(path);
+        dir = strdup(resolved);
         target_file = NULL;
     } else if (S_ISREG(path_stat.st_mode)) {
         /* path is a regular file — extract directory and remember target */
-        dir = get_dirname(path);
-        target_file = strdup(path);
+        dir = get_dirname(resolved);
+        target_file = strdup(resolved);
         if (!dir || !target_file) {
             free(dir);
             free(target_file);
+            free(resolved);
             return;
         }
     } else {
-        fprintf(stderr, "app_load_directory: not a file or directory: '%s'\n", path);
+        fprintf(stderr, "app_load_directory: not a file or directory: '%s'\n", resolved);
+        free(resolved);
         return;
     }
+
+    free(resolved);
 
     /* Scan the directory */
     DIR *dp = opendir(dir);

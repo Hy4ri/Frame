@@ -39,6 +39,9 @@ void viewer_prefetch_around(Viewer *v, struct AppState *app);
 /* Check if an image is already in the cache (non-blocking). */
 bool viewer_is_cached(Viewer *v, const char *path);
 
+/* Check if a thumbnail or full image is already in the cache (non-blocking). */
+bool viewer_is_thumb_cached(Viewer *v, const char *path);
+
 /* --- Zoom --- */
 void viewer_zoom_in(Viewer *v);       /* +5% from center */
 void viewer_zoom_out(Viewer *v);      /* -5% from center */

@@ -91,6 +91,8 @@ int main(int argc, char *argv[]) {
         int timeout_ms = -1;
         if (viewer_needs_tick(viewer)) {
             timeout_ms = viewer_is_animated(viewer) ? 10 : 25;
+        } else if (input_nav_pending()) {
+            timeout_ms = 25;
         }
 
         if (SDL_WaitEventTimeout(&event, timeout_ms)) {
@@ -100,10 +102,14 @@ int main(int argc, char *argv[]) {
                     running = false;
                     break;
 
-                case SDL_EVENT_KEY_DOWN:
-                    running = input_handle_keyboard(app, viewer, &event.key, window, renderer);
-                    dirty = true;
+                case SDL_EVENT_KEY_DOWN: {
+                    bool key_dirty = false;
+                    running = input_handle_keyboard(app, viewer, &event.key, window, renderer, &key_dirty);
+                    if (key_dirty) {
+                        dirty = true;
+                    }
                     break;
+                }
 
                 case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
                     viewer_handle_resize(viewer,
@@ -150,6 +156,11 @@ int main(int argc, char *argv[]) {
                     break;
                 }
             } while (SDL_PollEvent(&event));
+        }
+
+        /* Check if we stopped scrolling and need to load the final image */
+        if (input_check_and_trigger_nav(app, viewer)) {
+            dirty = true;
         }
 
         /* Advance animation frames */

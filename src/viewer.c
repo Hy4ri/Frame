@@ -457,6 +457,12 @@ bool viewer_is_cached(Viewer *v, const char *path)
     return cache_get(v->cache, path) != NULL;
 }
 
+bool viewer_is_thumb_cached(Viewer *v, const char *path)
+{
+    if (!v || !path) return false;
+    return (cache_get(v->cache, path) != NULL) || (cache_get(v->thumb_cache, path) != NULL);
+}
+
 /* ---- Zoom ---- */
 
 void viewer_zoom_in(Viewer *v)

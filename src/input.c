@@ -28,28 +28,52 @@ void input_reset_gg(void) {
 
 /* Prefetch is now handled asynchronously via viewer_prefetch_around(). */
 
-/* Navigate, reload image, update title, and prefetch neighbors */
-static void do_nav(struct AppState *app, struct Viewer *viewer, SDL_Window *window) {
-    const char *path = app_current_path(app);
-    if (!path) return;
+static Uint64 last_nav_ticks = 0;
+static bool nav_pending_load = false;
 
-    /* Check if there are pending navigation keypresses in the event queue.
-       If so, we skip loading the image right now to make rapid scrolling smooth. */
-    bool skip_load = false;
-    SDL_Event next_events[16];
-    int count = SDL_PeepEvents(next_events, 16, SDL_PEEKEVENT, SDL_EVENT_KEY_DOWN, SDL_EVENT_KEY_DOWN);
-    for (int i = 0; i < count; i++) {
-        SDL_Keycode k = next_events[i].key.key;
-        if (k == SDLK_LEFT  || k == SDLK_H || k == SDLK_UP   || k == SDLK_K ||
-            k == SDLK_RIGHT || k == SDLK_L || k == SDLK_DOWN || k == SDLK_J ||
-            k == SDLK_G) {
-            skip_load = true;
-            break;
+bool input_nav_pending(void) {
+    return nav_pending_load;
+}
+
+bool input_check_and_trigger_nav(struct AppState *app, struct Viewer *viewer) {
+    if (!nav_pending_load) return false;
+    Uint64 now = SDL_GetTicks();
+    if (now - last_nav_ticks >= 80) {
+        const char *path = app_current_path(app);
+        if (path) {
+            viewer_load_image(viewer, path);
+            viewer_prefetch_around(viewer, app);
         }
+        nav_pending_load = false;
+        return true;
     }
+    return false;
+}
 
-    if (!skip_load || viewer_is_cached(viewer, path)) {
+/* Navigate, reload image, update title, and prefetch neighbors */
+static bool do_nav(struct AppState *app, struct Viewer *viewer, SDL_Window *window) {
+    const char *path = app_current_path(app);
+    if (!path) return false;
+
+    Uint64 now = SDL_GetTicks();
+    Uint64 delta = now - last_nav_ticks;
+    last_nav_ticks = now;
+
+    /* If user navigates faster than every 80ms, we are in rapid scroll mode. */
+    bool rapid = (delta < 80);
+    bool loaded = false;
+
+    if (!rapid) {
         viewer_load_image(viewer, path);
+        nav_pending_load = false;
+        loaded = true;
+    } else {
+        /* In rapid scroll mode, only load if we have a cached full image or a cached thumbnail */
+        if (viewer_is_thumb_cached(viewer, path)) {
+            viewer_load_image(viewer, path);
+            loaded = true;
+        }
+        nav_pending_load = true;
     }
 
     /* Update window title: "filename (N/M) - Frame" */
@@ -60,18 +84,26 @@ static void do_nav(struct AppState *app, struct Viewer *viewer, SDL_Window *wind
              name, app_current_index(app), app_image_count(app));
     SDL_SetWindowTitle(window, title);
 
-    if (!skip_load) {
+    /* Prefetch neighbors only if we performed a full load (not in rapid scroll) */
+    if (!rapid) {
         viewer_prefetch_around(viewer, app);
     }
+
+    return loaded;
 }
 
 /* --- Main handler --- */
 
 bool input_handle_keyboard(struct AppState *app, struct Viewer *viewer,
                            const SDL_KeyboardEvent *event,
-                           SDL_Window *window, SDL_Renderer *renderer) {
+                           SDL_Window *window, SDL_Renderer *renderer,
+                           bool *out_dirty) {
     SDL_Keycode key = event->key;
     bool shift = (event->mod & SDL_KMOD_SHIFT) != 0;
+
+    if (out_dirty) {
+        *out_dirty = false;
+    }
 
     /* Quit first (don't reset gg state for these) */
     if (key == SDLK_Q || key == SDLK_ESCAPE) {
@@ -82,6 +114,7 @@ bool input_handle_keyboard(struct AppState *app, struct Viewer *viewer,
     if (overlay_is_active()) {
         overlay_hide();
         g_sequence = false;
+        if (out_dirty) *out_dirty = true;
         return true;
     }
 
@@ -92,14 +125,14 @@ bool input_handle_keyboard(struct AppState *app, struct Viewer *viewer,
     case SDLK_UP:
     case SDLK_K:
         app_prev_image(app);
-        do_nav(app, viewer, window);
+        if (out_dirty) *out_dirty = do_nav(app, viewer, window);
         goto reset_gg;
     case SDLK_RIGHT:
     case SDLK_L:
     case SDLK_DOWN:
     case SDLK_J:
         app_next_image(app);
-        do_nav(app, viewer, window);
+        if (out_dirty) *out_dirty = do_nav(app, viewer, window);
         goto reset_gg;
     default:
         break;
@@ -110,7 +143,7 @@ bool input_handle_keyboard(struct AppState *app, struct Viewer *viewer,
         if (shift) {
             /* SHIFT+G = 'G' = last image */
             app_last_image(app);
-            do_nav(app, viewer, window);
+            if (out_dirty) *out_dirty = do_nav(app, viewer, window);
             g_sequence = false;
             return true;
         }
@@ -119,13 +152,19 @@ bool input_handle_keyboard(struct AppState *app, struct Viewer *viewer,
         if (g_sequence && (now - g_prev_tick) < 500) {
             /* Double 'g' within 500ms */
             app_first_image(app);
-            do_nav(app, viewer, window);
+            if (out_dirty) *out_dirty = do_nav(app, viewer, window);
             g_sequence = false;
             return true;
         }
         g_sequence = true;
         g_prev_tick = now;
+        if (out_dirty) *out_dirty = false;
         return true;
+    }
+
+    /* Set default dirty flag for other actions */
+    if (out_dirty) {
+        *out_dirty = true;
     }
 
     /* === View controls === */

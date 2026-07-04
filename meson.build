@@ -30,6 +30,7 @@ sources = [
   'src/anim.c',
   'src/exif.c',
   'src/prefetch.c',
+  'src/search.c',
 ]
 
 executable('frame',

@@ -25,6 +25,7 @@
 - **Zoom & Pan** — Mouse wheel zoom (cursor-aware), click-and-drag panning
 - **Rotation** — 90° clockwise and counter-clockwise
 - **Image Ops** — Delete (move to trash with SDL confirmation dialog), rename via SDL entry dialog
+- **Fuzzy Search Grid** — Full-screen 5x5 scrollable thumbnail search menu with fuzzy filtering, activated by pressing `/`
 - **Image Info** — Dimensions, file size, format, EXIF data overlay
 - **Format Support** — JPEG, PNG, GIF, APNG, WebP, BMP, TIFF, ICO
 - **Animated Images** — Full GIF and APNG animation playback
@@ -109,6 +110,7 @@ Frame scans the directory for all supported image files, sorts them alphabetical
 | `r`, `R` | Rotate CW / CCW |
 | `d` / `Del` | Delete (move to trash) |
 | `F2` | Rename |
+| `/` | Open image search grid |
 | `i` | Show image info overlay |
 | `?` | Show keyboard shortcuts |
 | `q` / `Esc` | Quit |

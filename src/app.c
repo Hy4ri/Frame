@@ -153,8 +153,9 @@ void app_load_directory(AppState *app, const char *path) {
 
     struct dirent *entry;
     while ((entry = readdir(dp)) != NULL) {
-        /* Skip directories */
+        /* Skip directories and non-relevant file types */
         if (entry->d_type == DT_DIR) continue;
+        if (entry->d_type != DT_REG && entry->d_type != DT_LNK && entry->d_type != DT_UNKNOWN) continue;
 
         const char *name = entry->d_name;
 
@@ -170,11 +171,13 @@ void app_load_directory(AppState *app, const char *path) {
         full_path[dir_len] = '/';
         memcpy(full_path + dir_len + 1, name, name_len + 1);
 
-        /* Double-check it's not a directory via stat */
-        struct stat st;
-        if (stat(full_path, &st) != 0 || S_ISDIR(st.st_mode)) {
-            free(full_path);
-            continue;
+        /* Double-check via stat only for symlinks and unknown file types */
+        if (entry->d_type == DT_LNK || entry->d_type == DT_UNKNOWN) {
+            struct stat st;
+            if (stat(full_path, &st) != 0 || !S_ISREG(st.st_mode)) {
+                free(full_path);
+                continue;
+            }
         }
 
         /* Append to dynamic array */

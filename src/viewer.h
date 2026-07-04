@@ -79,4 +79,10 @@ bool viewer_animation_tick(Viewer *v);
 /* Check if the viewer needs active background ticking (for animation or thumbnail swap). */
 bool viewer_needs_tick(const Viewer *v);
 
+/* Get the thumbnail cache (for search grid to read cached thumbnails). */
+struct ImageCache *viewer_get_thumb_cache(const Viewer *v);
+
+/* Prefetch a specific list of image paths. */
+void viewer_prefetch_paths(Viewer *v, const char **paths, int count);
+
 #endif /* FRAME_VIEWER_H */

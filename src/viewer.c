@@ -654,3 +654,16 @@ bool viewer_needs_tick(const Viewer *v)
     if (!v) return false;
     return v->is_animated || v->showing_thumbnail;
 }
+
+struct ImageCache *viewer_get_thumb_cache(const Viewer *v)
+{
+    if (!v) return NULL;
+    return v->thumb_cache;
+}
+
+void viewer_prefetch_paths(Viewer *v, const char **paths, int count)
+{
+    if (v && v->prefetcher) {
+        prefetch_submit(v->prefetcher, paths, count);
+    }
+}

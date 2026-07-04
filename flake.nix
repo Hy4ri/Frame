@@ -20,6 +20,7 @@
         src = pkgs.fetchzip {
           url = "https://github.com/Hy4ri/Frame/releases/download/v${version}/frame-linux-x86_64.tar.gz";
           hash = "sha256-eSKVZ08C34vTR76x3qPPRtsbB5QPQwVqMwW1+ucKYUg=";
+          stripRoot = false;
         };
 
         nativeBuildInputs = with pkgs; [

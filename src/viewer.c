@@ -197,6 +197,9 @@ void viewer_load_image(Viewer *v, const char *path)
 {
     if (!v || !path) return;
 
+    /* Pin the path in the cache so background prefetch worker won't evict it */
+    cache_pin(v->cache, path);
+
     /* Free existing animation */
     if (v->animation) {
         anim_free(v->animation);
@@ -258,10 +261,17 @@ void viewer_load_image(Viewer *v, const char *path)
         if (!v->original) return;
         v->owns_original = true;
 
-        /* Put into cache. If successfully cached, the cache takes ownership. */
-        cache_put(v->cache, path, v->original);
-        if (cache_get(v->cache, path) == v->original) {
-            v->owns_original = false;
+        /* Put into cache only if another thread hasn't cached it in the meantime.
+           If successfully cached, the cache takes ownership. */
+        SDL_Surface *existing = cache_get(v->cache, path);
+        if (!existing) {
+            cache_put(v->cache, path, v->original);
+            if (cache_get(v->cache, path) == v->original) {
+                v->owns_original = false;
+            }
+        } else {
+            /* Already cached by prefetcher thread, keep our loaded copy as owned */
+            v->owns_original = true;
         }
     }
 
@@ -284,6 +294,7 @@ void viewer_load_image(Viewer *v, const char *path)
 void viewer_clear(Viewer *v)
 {
     if (!v) return;
+    cache_pin(v->cache, NULL);
     SDL_DestroyTexture(v->texture);
     v->texture = NULL;
     if (v->owns_original && v->original) {

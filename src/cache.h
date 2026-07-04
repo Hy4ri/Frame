@@ -28,4 +28,7 @@ void cache_put(ImageCache *cache, const char *path, SDL_Surface *surface);
    Safe to call even if the path is not cached. */
 void cache_invalidate(ImageCache *cache, const char *path);
 
+/* Pin a path to prevent it from being evicted. Pass NULL to unpin. */
+void cache_pin(ImageCache *cache, const char *path);
+
 #endif /* FRAME_CACHE_H */

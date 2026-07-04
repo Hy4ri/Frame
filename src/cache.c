@@ -21,6 +21,7 @@ struct ImageCache {
 
     int *hash_table;      // maps path to entry index
     int hash_capacity;
+    char *pinned_path;    // path of currently displayed image, must not be evicted
 };
 
 /* --- Internal helpers (caller must hold mutex) --- */
@@ -176,6 +177,7 @@ void cache_destroy(ImageCache *cache)
 
     pthread_mutex_unlock(&cache->mutex);
 
+    free(cache->pinned_path);
     free(cache->hash_table);
     free(cache->entries);
     free(cache->order);
@@ -213,29 +215,39 @@ void cache_put(ImageCache *cache, const char *path, SDL_Surface *surface)
 
     int idx = find_index(cache, path);
     if (idx >= 0) {
-        /* Entry exists — replace */
-        if (cache->entries[idx].surface)
-            SDL_DestroySurface(cache->entries[idx].surface);
-        cache->entries[idx].surface = surface;
-        touch_locked(cache, idx);
+        /* Entry exists — do not replace to prevent overwriting active surfaces
+           that are currently being used by the main thread. Just discard. */
+        SDL_DestroySurface(surface);
     } else {
         /* New entry */
         if (cache->len >= cache->capacity) {
-            /* Evict LRU entry (order[0]) */
-            int evict_idx = cache->order[0];
+            /* Find first unpinned entry in LRU order */
+            int evict_order_pos = 0;
+            while (evict_order_pos < cache->len) {
+                int o_idx = cache->order[evict_order_pos];
+                if (cache->pinned_path && cache->entries[o_idx].path &&
+                    strcmp(cache->entries[o_idx].path, cache->pinned_path) == 0) {
+                    evict_order_pos++;
+                    continue;
+                }
+                break;
+            }
+            if (evict_order_pos >= cache->len) {
+                /* Fallback if everything is somehow pinned */
+                evict_order_pos = 0;
+            }
+            int evict_idx = cache->order[evict_order_pos];
             free(cache->entries[evict_idx].path);
             if (cache->entries[evict_idx].surface)
                 SDL_DestroySurface(cache->entries[evict_idx].surface);
             cache->entries[evict_idx].path = NULL;
             cache->entries[evict_idx].surface = NULL;
 
-            /* Remove from order by shifting left */
-            for (int i = 0; i < cache->len - 1; i++)
+            /* Shift elements in order array left to remove the evicted entry */
+            for (int i = evict_order_pos; i < cache->len - 1; i++)
                 cache->order[i] = cache->order[i + 1];
 
-            cache->len--;
-
-            /* Reuse the freed slot */
+            /* Reuse the freed slot (do NOT decrement cache->len) */
             idx = evict_idx;
         } else {
             idx = cache->len;
@@ -317,5 +329,18 @@ void cache_invalidate(ImageCache *cache, const char *path)
 
     rebuild_hash_table(cache);
 
+    pthread_mutex_unlock(&cache->mutex);
+}
+
+void cache_pin(ImageCache *cache, const char *path)
+{
+    if (!cache) return;
+    pthread_mutex_lock(&cache->mutex);
+    free(cache->pinned_path);
+    if (path) {
+        cache->pinned_path = strdup(path);
+    } else {
+        cache->pinned_path = NULL;
+    }
     pthread_mutex_unlock(&cache->mutex);
 }

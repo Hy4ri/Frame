@@ -28,9 +28,9 @@
         ];
 
         buildInputs = with pkgs; [
-          sdl3
-          sdl3-image
-          sdl3-ttf
+          sdl3-trimmed
+          sdl3-image-trimmed
+          sdl3-ttf-trimmed
           libexif
           stdenv.cc.cc.lib
         ];

@@ -32,7 +32,25 @@ void input_reset_gg(void) {
 static void do_nav(struct AppState *app, struct Viewer *viewer, SDL_Window *window) {
     const char *path = app_current_path(app);
     if (!path) return;
-    viewer_load_image(viewer, path);
+
+    /* Check if there are pending navigation keypresses in the event queue.
+       If so, we skip loading the image right now to make rapid scrolling smooth. */
+    bool skip_load = false;
+    SDL_Event next_events[16];
+    int count = SDL_PeepEvents(next_events, 16, SDL_PEEKEVENT, SDL_EVENT_KEY_DOWN, SDL_EVENT_KEY_DOWN);
+    for (int i = 0; i < count; i++) {
+        SDL_Keycode k = next_events[i].key.key;
+        if (k == SDLK_LEFT  || k == SDLK_H || k == SDLK_UP   || k == SDLK_K ||
+            k == SDLK_RIGHT || k == SDLK_L || k == SDLK_DOWN || k == SDLK_J ||
+            k == SDLK_G) {
+            skip_load = true;
+            break;
+        }
+    }
+
+    if (!skip_load || viewer_is_cached(viewer, path)) {
+        viewer_load_image(viewer, path);
+    }
 
     /* Update window title: "filename (N/M) - Frame" */
     const char *name = strrchr(path, '/');

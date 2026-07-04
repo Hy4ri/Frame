@@ -36,6 +36,9 @@ void viewer_prefetch(Viewer *v, const char *path);
    prefetching.  Call after every navigation or deletion. */
 void viewer_prefetch_around(Viewer *v, struct AppState *app);
 
+/* Check if an image is already in the cache (non-blocking). */
+bool viewer_is_cached(Viewer *v, const char *path);
+
 /* --- Zoom --- */
 void viewer_zoom_in(Viewer *v);       /* +5% from center */
 void viewer_zoom_out(Viewer *v);      /* -5% from center */

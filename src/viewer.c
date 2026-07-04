@@ -389,6 +389,12 @@ void viewer_prefetch_around(Viewer *v, struct AppState *app)
         prefetch_submit(v->prefetcher, paths, n);
 }
 
+bool viewer_is_cached(Viewer *v, const char *path)
+{
+    if (!v || !path) return false;
+    return cache_get(v->cache, path) != NULL;
+}
+
 /* ---- Zoom ---- */
 
 void viewer_zoom_in(Viewer *v)

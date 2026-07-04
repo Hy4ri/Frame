@@ -642,3 +642,9 @@ bool viewer_animation_tick(Viewer *v)
 
     return dirty;
 }
+
+bool viewer_needs_tick(const Viewer *v)
+{
+    if (!v) return false;
+    return v->is_animated || v->showing_thumbnail;
+}

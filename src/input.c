@@ -60,7 +60,9 @@ static void do_nav(struct AppState *app, struct Viewer *viewer, SDL_Window *wind
              name, app_current_index(app), app_image_count(app));
     SDL_SetWindowTitle(window, title);
 
-    viewer_prefetch_around(viewer, app);
+    if (!skip_load) {
+        viewer_prefetch_around(viewer, app);
+    }
 }
 
 /* --- Main handler --- */

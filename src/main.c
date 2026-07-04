@@ -88,7 +88,10 @@ int main(int argc, char *argv[]) {
     bool dirty = true;
 
     while (running) {
-        int timeout_ms = viewer_is_animated(viewer) ? 10 : 250;
+        int timeout_ms = -1;
+        if (viewer_needs_tick(viewer)) {
+            timeout_ms = viewer_is_animated(viewer) ? 10 : 25;
+        }
 
         if (SDL_WaitEventTimeout(&event, timeout_ms)) {
             do {

@@ -73,4 +73,7 @@ bool viewer_is_animated(const Viewer *v);
    Returns true if the frame changed (caller should re-render). */
 bool viewer_animation_tick(Viewer *v);
 
+/* Check if the viewer needs active background ticking (for animation or thumbnail swap). */
+bool viewer_needs_tick(const Viewer *v);
+
 #endif /* FRAME_VIEWER_H */

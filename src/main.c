@@ -17,7 +17,16 @@
 #undef main
 #endif
 
+#ifndef FRAME_VERSION
+#define FRAME_VERSION "1.3.3"
+#endif
+
 int main(int argc, char *argv[]) {
+    if (argc > 1 && (strcmp(argv[1], "-v") == 0 || strcmp(argv[1], "--version") == 0)) {
+        printf("Frame version %s\n", FRAME_VERSION);
+        return 0;
+    }
+
     const char *initial_path = (argc > 1) ? argv[1] : NULL;
 
     /* Initialize SDL */

@@ -36,5 +36,6 @@ sources = [
 executable('frame',
   sources,
   dependencies: [sdl3_dep, sdl3_image_dep, sdl3_ttf_dep, libexif_dep, thread_dep, m_dep],
+  c_args: ['-DFRAME_VERSION="' + meson.project_version() + '"'],
   install: true,
 )

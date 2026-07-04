@@ -86,6 +86,7 @@ make && ./frame /path/to/image.jpg
 ```bash
 frame /path/to/image.jpg   # Open a specific image
 frame /path/to/images/     # Open a directory (all supported images, sorted)
+frame -v | --version        # Print version information
 frame                       # Show usage message
 ```
 

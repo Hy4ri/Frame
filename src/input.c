@@ -213,7 +213,7 @@ bool input_handle_keyboard(struct AppState *app, struct Viewer *viewer,
         int ret = snprintf(msg, sizeof(msg), "Move \"%s\" to trash?", name);
         if (ret < 0 || (size_t)ret >= sizeof(msg)) goto reset_gg;
 
-        if (!overlay_modal_confirm("Delete Image", msg, renderer)) {
+        if (!overlay_modal_confirm("Delete Image", msg, renderer, viewer)) {
             goto reset_gg;
         }
 
@@ -251,7 +251,7 @@ bool input_handle_keyboard(struct AppState *app, struct Viewer *viewer,
         const char *name = strrchr(path, '/');
         name = name ? name + 1 : path;
 
-        char *new_name = overlay_modal_entry("Rename Image", name, renderer, window);
+        char *new_name = overlay_modal_entry("Rename Image", name, renderer, window, viewer);
         if (!new_name) goto reset_gg;
 
         /* Validate name */
@@ -332,9 +332,14 @@ bool input_handle_keyboard(struct AppState *app, struct Viewer *viewer,
         goto reset_gg;
     }
 
-    /* === Help (?) === */
+    /* === Help (?) and Search (/) === */
     if (key == SDLK_SLASH) {
-        if (!shift) goto reset_gg; /* '/' does nothing, only '?' (shift+/) */
+        if (!shift) {
+            /* '/' without shift triggers search. This will be intercepted in main loop.
+               Return true and out_dirty=true so main loop can open search overlay. */
+            if (out_dirty) *out_dirty = true;
+            return true;
+        }
         overlay_show_help();
         goto reset_gg;
     }

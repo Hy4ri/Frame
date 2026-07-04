@@ -9,6 +9,7 @@
 #include "viewer.h"
 #include "input.h"
 #include "overlay.h"
+#include "search.h"
 
 #ifdef _WIN32
 /* SDL3 requires SDL_main on some platforms, but we define it ourselves here.
@@ -54,6 +55,7 @@ int main(int argc, char *argv[]) {
 
     /* Initialize overlay system (fonts) */
     overlay_init();
+    search_init();
 
     /* Load initial directory and display first image */
     if (initial_path) {
@@ -89,7 +91,9 @@ int main(int argc, char *argv[]) {
 
     while (running) {
         int timeout_ms = -1;
-        if (viewer_needs_tick(viewer)) {
+        if (search_is_active()) {
+            timeout_ms = 50;
+        } else if (viewer_needs_tick(viewer)) {
             timeout_ms = viewer_is_animated(viewer) ? 10 : 25;
         } else if (input_nav_pending()) {
             timeout_ms = 25;
@@ -104,12 +108,46 @@ int main(int argc, char *argv[]) {
 
                 case SDL_EVENT_KEY_DOWN: {
                     bool key_dirty = false;
-                    running = input_handle_keyboard(app, viewer, &event.key, window, renderer, &key_dirty);
-                    if (key_dirty) {
+                    if (search_is_active()) {
+                        SearchResult res = search_handle_event(&event, window);
+                        if (res == SEARCH_SELECT) {
+                            int target_idx = search_selected_index();
+                            app_display_image(app, target_idx);
+                            
+                            const char *path = app_current_path(app);
+                            if (path) {
+                                viewer_load_image(viewer, path);
+                                /* Update window title */
+                                const char *name = strrchr(path, '/');
+                                name = name ? name + 1 : path;
+                                char title[512];
+                                snprintf(title, sizeof(title), "%s (%d/%d) - Frame",
+                                         name, app_current_index(app), app_image_count(app));
+                                SDL_SetWindowTitle(window, title);
+                                viewer_prefetch_around(viewer, app);
+                            }
+                        }
                         dirty = true;
+                    } else {
+                        running = input_handle_keyboard(app, viewer, &event.key, window, renderer, &key_dirty);
+                        /* Intercept search request: '/' key from input.c sets key_dirty but isn't handled.
+                           Check if slash key was pressed (without shift) and trigger search. */
+                        if (event.key.key == SDLK_SLASH && !(event.key.mod & SDL_KMOD_SHIFT)) {
+                            search_open(app, viewer, renderer, window);
+                        }
+                        if (key_dirty) {
+                            dirty = true;
+                        }
                     }
                     break;
                 }
+
+                case SDL_EVENT_TEXT_INPUT:
+                    if (search_is_active()) {
+                        search_handle_event(&event, window);
+                        dirty = true;
+                    }
+                    break;
 
                 case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
                     viewer_handle_resize(viewer,
@@ -122,7 +160,7 @@ int main(int argc, char *argv[]) {
                     break;
 
                 case SDL_EVENT_MOUSE_BUTTON_DOWN:
-                    if (event.button.button == SDL_BUTTON_LEFT) {
+                    if (!search_is_active() && event.button.button == SDL_BUTTON_LEFT) {
                         viewer_begin_drag(viewer);
                         dragging = true;
                     }
@@ -147,8 +185,10 @@ int main(int argc, char *argv[]) {
                     break;
 
                 case SDL_EVENT_MOUSE_WHEEL:
-                    viewer_scroll_zoom(viewer, mouse_x, mouse_y,
-                                        event.wheel.y);
+                    if (!search_is_active()) {
+                        viewer_scroll_zoom(viewer, mouse_x, mouse_y,
+                                            event.wheel.y);
+                    }
                     dirty = true;
                     break;
 
@@ -163,6 +203,11 @@ int main(int argc, char *argv[]) {
             dirty = true;
         }
 
+        /* Check if search grid needs redrawing (e.g. new thumbnails loaded) */
+        if (search_is_active() && search_check_dirty()) {
+            dirty = true;
+        }
+
         /* Advance animation frames */
         if (viewer_animation_tick(viewer)) {
             dirty = true;
@@ -172,12 +217,16 @@ int main(int argc, char *argv[]) {
         if (dirty && running) {
             viewer_render(viewer, renderer);
             overlay_render(renderer);
+            if (search_is_active()) {
+                search_render(renderer);
+            }
             SDL_RenderPresent(renderer);
             dirty = false;
         }
     }
 
     /* Cleanup */
+    search_shutdown();
     overlay_shutdown();
     viewer_destroy(viewer);
     app_destroy(app);

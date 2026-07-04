@@ -24,11 +24,13 @@ bool overlay_is_available(void);
 /* Hide the currently displayed overlay. */
 void overlay_hide(void);
 
+struct Viewer;
+
 /* Modal confirm dialog. Blocks until user presses Enter (confirm) or Esc (cancel).
    Returns true if confirmed, false if cancelled.
    renderer: used to render the dialog during the modal loop. */
 bool overlay_modal_confirm(const char *title, const char *message,
-                           SDL_Renderer *renderer);
+                           SDL_Renderer *renderer, struct Viewer *viewer);
 
 /* Modal text entry dialog. Blocks until user presses Enter (confirm) or Esc (cancel).
    Returns a malloc'd string with the entered text, or NULL if cancelled.
@@ -36,7 +38,7 @@ bool overlay_modal_confirm(const char *title, const char *message,
    renderer: used to render the dialog.
    window: needed for SDL text input events. */
 char *overlay_modal_entry(const char *title, const char *initial_text,
-                          SDL_Renderer *renderer, SDL_Window *window);
+                          SDL_Renderer *renderer, SDL_Window *window, struct Viewer *viewer);
 
 /* Render the active overlay on top of the current frame.
    Must be called AFTER viewer_render() in the main loop. */

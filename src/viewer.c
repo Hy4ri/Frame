@@ -217,8 +217,8 @@ Viewer *viewer_create(SDL_Renderer *renderer)
     v->needs_fit = true;
     v->offset_x = 0.0f;
     v->offset_y = 0.0f;
-    v->cache = cache_create(50);
-    v->thumb_cache = cache_create(500);
+    v->cache = cache_create(50, 128 * 1024 * 1024);       /* 128 MB budget */
+    v->thumb_cache = cache_create(500, 32 * 1024 * 1024);  /* 32 MB budget */
     v->prefetcher = prefetch_create(v->cache, v->thumb_cache);
     return v;
 }

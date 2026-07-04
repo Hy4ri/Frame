@@ -6,9 +6,10 @@
 /* Opaque cache handle */
 typedef struct ImageCache ImageCache;
 
-/* Create a cache with the given capacity (max entries).
-   Returns NULL on allocation failure. */
-ImageCache *cache_create(int capacity);
+/* Create a cache with the given capacity (max entries) and memory budget
+   (max total bytes of stored surfaces).  Eviction triggers when either
+   limit is exceeded.  Pass 0 for max_bytes to disable the budget check. */
+ImageCache *cache_create(int capacity, size_t max_bytes);
 
 /* Destroy the cache, freeing all stored surfaces. */
 void cache_destroy(ImageCache *cache);

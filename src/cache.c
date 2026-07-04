@@ -18,16 +18,71 @@ struct ImageCache {
     int capacity;
     int len;              // current number of entries (0..capacity)
     pthread_mutex_t mutex;
+
+    int *hash_table;      // maps path to entry index
+    int hash_capacity;
 };
 
 /* --- Internal helpers (caller must hold mutex) --- */
 
 /* Find the entry index for a given path, or -1 if not found. */
+static uint32_t fnv1a_hash(const char *str)
+{
+    uint32_t hash = 2166136261u;
+    while (*str) {
+        hash ^= (unsigned char)*str++;
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+static int get_hash_capacity(int capacity)
+{
+    int size = 16;
+    while (size < capacity * 2) {
+        size *= 2;
+    }
+    return size;
+}
+
+static void hash_table_insert(ImageCache *cache, const char *path, int entry_idx)
+{
+    if (cache->hash_capacity <= 0 || !cache->hash_table) return;
+    uint32_t h = fnv1a_hash(path);
+    int mask = cache->hash_capacity - 1;
+    int idx = (int)(h & mask);
+    while (cache->hash_table[idx] != -1) {
+        idx = (idx + 1) & mask;
+    }
+    cache->hash_table[idx] = entry_idx;
+}
+
+static void rebuild_hash_table(ImageCache *cache)
+{
+    if (!cache->hash_table) return;
+    memset(cache->hash_table, -1, (size_t)cache->hash_capacity * sizeof(int));
+    for (int i = 0; i < cache->len; i++) {
+        if (cache->entries[i].path) {
+            hash_table_insert(cache, cache->entries[i].path, i);
+        }
+    }
+}
+
 static int find_index(ImageCache *cache, const char *path)
 {
-    for (int i = 0; i < cache->len; i++) {
-        if (strcmp(cache->entries[i].path, path) == 0)
-            return i;
+    if (!cache || !path || cache->hash_capacity <= 0 || !cache->hash_table)
+        return -1;
+
+    uint32_t h = fnv1a_hash(path);
+    int mask = cache->hash_capacity - 1;
+    int idx = (int)(h & mask);
+
+    while (cache->hash_table[idx] != -1) {
+        int entry_idx = cache->hash_table[idx];
+        if (cache->entries[entry_idx].path && strcmp(cache->entries[entry_idx].path, path) == 0) {
+            return entry_idx;
+        }
+        idx = (idx + 1) & mask;
     }
     return -1;
 }
@@ -85,7 +140,18 @@ ImageCache *cache_create(int capacity)
     cache->capacity = capacity;
     cache->len = 0;
 
+    cache->hash_capacity = get_hash_capacity(capacity);
+    cache->hash_table = malloc((size_t)cache->hash_capacity * sizeof(int));
+    if (!cache->hash_table) {
+        free(cache->entries);
+        free(cache->order);
+        free(cache);
+        return NULL;
+    }
+    memset(cache->hash_table, -1, (size_t)cache->hash_capacity * sizeof(int));
+
     if (pthread_mutex_init(&cache->mutex, NULL) != 0) {
+        free(cache->hash_table);
         free(cache->entries);
         free(cache->order);
         free(cache);
@@ -110,6 +176,7 @@ void cache_destroy(ImageCache *cache)
 
     pthread_mutex_unlock(&cache->mutex);
 
+    free(cache->hash_table);
     free(cache->entries);
     free(cache->order);
     pthread_mutex_destroy(&cache->mutex);
@@ -185,6 +252,7 @@ void cache_put(ImageCache *cache, const char *path, SDL_Surface *surface)
         cache->entries[idx].path = path_copy;
         cache->entries[idx].surface = surface;
         cache->order[cache->len - 1] = idx;
+        rebuild_hash_table(cache);
     }
 
     pthread_mutex_unlock(&cache->mutex);
@@ -246,6 +314,8 @@ void cache_invalidate(ImageCache *cache, const char *path)
             }
         }
     }
+
+    rebuild_hash_table(cache);
 
     pthread_mutex_unlock(&cache->mutex);
 }

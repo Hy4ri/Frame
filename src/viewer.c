@@ -15,6 +15,7 @@ struct Viewer {
 
     /* Original and rotated surfaces */
     SDL_Surface *original;       /* decoded image, rotation=0 */
+    bool owns_original;          /* true if the viewer owns original and must free it */
     SDL_Surface *rotated;        /* cached rotated version */
     int rotation_degrees;        /* 0, 90, 180, 270 */
 
@@ -130,17 +131,17 @@ static void viewer_apply_rotation(Viewer *v)
     }
 
     if (v->rotation_degrees == 0) {
-        /* Convert to RGBA8888 to handle indexed/palettized formats */
-        v->rotated = SDL_ConvertSurface(v->original, SDL_PIXELFORMAT_RGBA8888);
+        /* No rotation needed: upload original directly */
+        v->texture = SDL_CreateTextureFromSurface(v->renderer, v->original);
     } else {
         v->rotated = rotate_surface(v->original, v->rotation_degrees);
+        if (v->rotated) {
+            v->texture = SDL_CreateTextureFromSurface(v->renderer, v->rotated);
+        }
     }
 
-    if (v->rotated) {
-        v->texture = SDL_CreateTextureFromSurface(v->renderer, v->rotated);
-        if (v->texture) {
-            SDL_SetTextureScaleMode(v->texture, SDL_SCALEMODE_LINEAR);
-        }
+    if (v->texture) {
+        SDL_SetTextureScaleMode(v->texture, SDL_SCALEMODE_LINEAR);
     }
 }
 
@@ -213,10 +214,13 @@ void viewer_load_image(Viewer *v, const char *path)
     /* Free old surfaces and texture */
     SDL_DestroySurface(v->rotated);
     SDL_DestroyTexture(v->texture);
-    SDL_DestroySurface(v->original);
+    if (v->owns_original && v->original) {
+        SDL_DestroySurface(v->original);
+    }
     v->rotated = NULL;
     v->texture = NULL;
     v->original = NULL;
+    v->owns_original = false;
 
     /* Try animation first */
     if (loader_is_animated(path)) {
@@ -229,6 +233,7 @@ void viewer_load_image(Viewer *v, const char *path)
             if (frame) {
                 v->original = SDL_DuplicateSurface(frame);
                 if (v->original) {
+                    v->owns_original = true;
                     viewer_apply_rotation(v);
                     if (v->viewport_w > 0) {
                         viewer_zoom_fit(v);
@@ -245,17 +250,18 @@ void viewer_load_image(Viewer *v, const char *path)
     /* Try cache first */
     SDL_Surface *cached = cache_get(v->cache, path);
     if (cached) {
-        v->original = SDL_DuplicateSurface(cached);
-        if (!v->original) return;
+        v->original = cached;
+        v->owns_original = false;
     } else {
         /* Cache miss — load from file */
         v->original = loader_load_static(path);
         if (!v->original) return;
+        v->owns_original = true;
 
-        /* Put into cache (cache takes ownership of the duplicate) */
-        SDL_Surface *cache_copy = SDL_DuplicateSurface(v->original);
-        if (cache_copy) {
-            cache_put(v->cache, path, cache_copy);
+        /* Put into cache. If successfully cached, the cache takes ownership. */
+        cache_put(v->cache, path, v->original);
+        if (cache_get(v->cache, path) == v->original) {
+            v->owns_original = false;
         }
     }
 
@@ -263,8 +269,11 @@ void viewer_load_image(Viewer *v, const char *path)
     if (v->original->w > VIEWER_MAX_DIMENSION || v->original->h > VIEWER_MAX_DIMENSION) {
         fprintf(stderr, "Image dimensions (%dx%d) exceed maximum (%d)\n",
                 v->original->w, v->original->h, VIEWER_MAX_DIMENSION);
-        SDL_DestroySurface(v->original);
+        if (v->owns_original) {
+            SDL_DestroySurface(v->original);
+        }
         v->original = NULL;
+        v->owns_original = false;
         return;
     }
 
@@ -277,8 +286,11 @@ void viewer_clear(Viewer *v)
     if (!v) return;
     SDL_DestroyTexture(v->texture);
     v->texture = NULL;
-    SDL_DestroySurface(v->original);
+    if (v->owns_original && v->original) {
+        SDL_DestroySurface(v->original);
+    }
     v->original = NULL;
+    v->owns_original = false;
     SDL_DestroySurface(v->rotated);
     v->rotated = NULL;
     v->rotation_degrees = 0;
@@ -403,10 +415,12 @@ void viewer_scroll_zoom(Viewer *v, float mx, float my, float dy)
 
 void viewer_zoom_fit(Viewer *v)
 {
-    if (!v || v->is_animated || !v->rotated || v->viewport_w == 0 || v->viewport_h == 0) return;
+    if (!v || v->is_animated || v->viewport_w == 0 || v->viewport_h == 0) return;
+    SDL_Surface *ref = v->rotated ? v->rotated : v->original;
+    if (!ref) return;
 
-    float w = (float)v->rotated->w;
-    float h = (float)v->rotated->h;
+    float w = (float)ref->w;
+    float h = (float)ref->h;
 
     float scale_w = v->viewport_w / w;
     float scale_h = v->viewport_h / h;
@@ -418,11 +432,12 @@ void viewer_zoom_fit(Viewer *v)
 
 void viewer_zoom_original(Viewer *v)
 {
-    if (!v || v->is_animated || !v->rotated) return;
+    SDL_Surface *ref = v->rotated ? v->rotated : v->original;
+    if (!v || v->is_animated || !ref) return;
 
     v->scale = 1.0f;
-    float w = (float)v->rotated->w;
-    float h = (float)v->rotated->h;
+    float w = (float)ref->w;
+    float h = (float)ref->h;
 
     /* Center if image is smaller than viewport */
     v->offset_x = (v->viewport_w > w) ? (v->viewport_w - w) / 2.0f : 0.0f;
@@ -510,8 +525,11 @@ bool viewer_animation_tick(Viewer *v)
     /* Update the display with the new frame */
     SDL_Surface *frame = anim_get_frame(v->animation, v->anim_frame);
     if (frame) {
-        SDL_DestroySurface(v->original);
+        if (v->owns_original && v->original) {
+            SDL_DestroySurface(v->original);
+        }
         v->original = SDL_DuplicateSurface(frame);
+        v->owns_original = true;
 
         /* Regenerate texture from the new frame */
         if (v->rotation_degrees == 0) {

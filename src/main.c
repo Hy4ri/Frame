@@ -178,7 +178,6 @@ int main(int argc, char *argv[]) {
     }
 
     /* Cleanup */
-    printf("Shutting down...\n");
     overlay_shutdown();
     viewer_destroy(viewer);
     app_destroy(app);

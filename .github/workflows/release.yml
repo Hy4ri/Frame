@@ -1,0 +1,94 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Linux Release
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            meson \
+            ninja-build \
+            pkg-config \
+            libexif-dev \
+            libfreetype-dev \
+            libharfbuzz-dev \
+            libx11-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            wayland-protocols \
+            libegl1-mesa-dev \
+            libgl1-mesa-dev \
+            libgbm-dev \
+            libdrm-dev \
+            libdbus-1-dev \
+            libasound2-dev \
+            libpulse-dev \
+            libudev-dev \
+            cmake
+
+      - name: Compile and Install SDL3
+        run: |
+          git clone --depth 1 https://github.com/libsdl-org/SDL.git -b main
+          cd SDL
+          mkdir build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DSDL_STATIC=OFF -DSDL_SHARED=ON
+          make -j$(nproc)
+          sudo make install
+
+      - name: Compile and Install SDL3_image
+        run: |
+          git clone --depth 1 https://github.com/libsdl-org/SDL_image.git -b main
+          cd SDL_image
+          mkdir build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+          make -j$(nproc)
+          sudo make install
+
+      - name: Compile and Install SDL3_ttf
+        run: |
+          git clone --depth 1 https://github.com/libsdl-org/SDL_ttf.git -b main
+          cd SDL_ttf
+          mkdir build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+          make -j$(nproc)
+          sudo make install
+
+      - name: Configure with Meson
+        run: meson setup build --buildtype=release
+
+      - name: Compile Frame
+        run: meson compile -C build
+
+      - name: Package Binary
+        run: |
+          mkdir -p dist
+          cp build/frame dist/
+          cp frame.desktop dist/
+          cp LICENSE dist/
+          tar -czvf frame-linux-x86_64.tar.gz -C dist .
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: frame-linux-x86_64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

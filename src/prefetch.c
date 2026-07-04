@@ -15,6 +15,7 @@
 
 struct Prefetcher {
     ImageCache *cache;            /* borrowed, already mutex-protected */
+    ImageCache *thumb_cache;      /* borrowed, already mutex-protected */
 
     /* --- request queue (protected by `mutex`) --- */
     pthread_mutex_t mutex;
@@ -84,8 +85,23 @@ static void *worker_func(void *arg)
             continue;
         }
 
-        if (surface)
+        if (surface) {
+            /* Create a scaled-down thumbnail (max dimension 256) for quick display previews */
+            int tw = 256;
+            int th = 256;
+            if (surface->w > surface->h) {
+                th = (int)((float)surface->h * 256.0f / (float)surface->w);
+                if (th < 1) th = 1;
+            } else {
+                tw = (int)((float)surface->w * 256.0f / (float)surface->h);
+                if (tw < 1) tw = 1;
+            }
+            SDL_Surface *thumb = SDL_ScaleSurface(surface, tw, th, SDL_SCALEMODE_LINEAR);
+            if (thumb) {
+                cache_put(pf->thumb_cache, path, thumb);
+            }
             cache_put(pf->cache, path, surface); /* cache takes ownership */
+        }
         free(path);
         continue;
 
@@ -97,9 +113,9 @@ relock:
     return NULL;
 }
 
-Prefetcher *prefetch_create(ImageCache *cache)
+Prefetcher *prefetch_create(ImageCache *cache, ImageCache *thumb_cache)
 {
-    if (!cache)
+    if (!cache || !thumb_cache)
         return NULL;
 
     Prefetcher *pf = calloc(1, sizeof(Prefetcher));
@@ -107,6 +123,7 @@ Prefetcher *prefetch_create(ImageCache *cache)
         return NULL;
 
     pf->cache = cache;
+    pf->thumb_cache = thumb_cache;
 
     if (pthread_mutex_init(&pf->mutex, NULL) != 0) {
         free(pf);

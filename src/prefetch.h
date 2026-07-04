@@ -15,7 +15,7 @@ typedef struct Prefetcher Prefetcher;
 
 /* Create a prefetcher and spawn its worker thread.
    `cache` is borrowed — must outlive the prefetcher. */
-Prefetcher *prefetch_create(ImageCache *cache);
+Prefetcher *prefetch_create(ImageCache *cache, ImageCache *thumb_cache);
 
 /* Signal the worker thread to stop and join it, then free resources. */
 void prefetch_destroy(Prefetcher *pf);

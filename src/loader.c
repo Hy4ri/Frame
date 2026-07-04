@@ -3,6 +3,10 @@
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 /* NULL-terminated array of supported image extensions */
 const char *supported_extensions[] = {
@@ -46,9 +50,40 @@ bool loader_is_animated(const char *path)
 
 SDL_Surface *loader_load_static(const char *path)
 {
-    SDL_Surface *surface = IMG_Load(path);
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) {
+        fprintf(stderr, "mmap_load: failed to open '%s'\n", path);
+        return NULL;
+    }
+
+    struct stat st;
+    if (fstat(fd, &st) != 0 || st.st_size <= 0) {
+        close(fd);
+        fprintf(stderr, "mmap_load: failed to stat '%s'\n", path);
+        return NULL;
+    }
+
+    size_t size = (size_t)st.st_size;
+    void *map = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
+    close(fd); /* fd can be closed immediately after mmap */
+
+    if (map == MAP_FAILED) {
+        fprintf(stderr, "mmap_load: mmap failed for '%s'\n", path);
+        return NULL;
+    }
+
+    SDL_IOStream *stream = SDL_IOFromConstMem(map, size);
+    if (!stream) {
+        munmap(map, size);
+        fprintf(stderr, "mmap_load: SDL_IOFromConstMem failed for '%s'\n", path);
+        return NULL;
+    }
+
+    SDL_Surface *surface = IMG_Load_IO(stream, true); /* closes stream */
+    munmap(map, size);
+
     if (!surface) {
-        fprintf(stderr, "IMG_Load failed for '%s': %s\n", path, SDL_GetError());
+        fprintf(stderr, "mmap_load: IMG_Load_IO failed for '%s': %s\n", path, SDL_GetError());
         return NULL;
     }
 

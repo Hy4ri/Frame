@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+#define _DEFAULT_SOURCE
 #include "viewer.h"
 #include "loader.h"
 #include "cache.h"
@@ -37,11 +39,16 @@ struct Viewer {
 
     /* Cache for prefetching */
     struct ImageCache *cache;
+    struct ImageCache *thumb_cache;
     struct Prefetcher *prefetcher;
 
     /* Texture reuse size/format tracking */
     int texture_w, texture_h;
     SDL_PixelFormat texture_format;
+
+    /* Thumbnail display tracking */
+    char *current_path;
+    bool showing_thumbnail;
 };
 
 /* ---- internal helpers ---- */
@@ -211,7 +218,8 @@ Viewer *viewer_create(SDL_Renderer *renderer)
     v->offset_x = 0.0f;
     v->offset_y = 0.0f;
     v->cache = cache_create(50);
-    v->prefetcher = prefetch_create(v->cache);
+    v->thumb_cache = cache_create(500);
+    v->prefetcher = prefetch_create(v->cache, v->thumb_cache);
     return v;
 }
 
@@ -221,12 +229,18 @@ void viewer_destroy(Viewer *v)
     viewer_clear(v);
     prefetch_destroy(v->prefetcher);
     cache_destroy(v->cache);
+    cache_destroy(v->thumb_cache);
+    free(v->current_path);
     free(v);
 }
 
 void viewer_load_image(Viewer *v, const char *path)
 {
     if (!v || !path) return;
+
+    free(v->current_path);
+    v->current_path = strdup(path);
+    v->showing_thumbnail = false;
 
     /* Pin the path in the cache so background prefetch worker won't evict it */
     cache_pin(v->cache, path);
@@ -285,25 +299,33 @@ void viewer_load_image(Viewer *v, const char *path)
         v->original = cached;
         v->owns_original = false;
     } else {
-        /* Cache miss — load from file */
-        v->original = loader_load_static(path);
-        if (!v->original) {
-            viewer_clear(v);
-            return;
-        }
-        v->owns_original = true;
-
-        /* Put into cache only if another thread hasn't cached it in the meantime.
-           If successfully cached, the cache takes ownership. */
-        SDL_Surface *existing = cache_get(v->cache, path);
-        if (!existing) {
-            cache_put(v->cache, path, v->original);
-            if (cache_get(v->cache, path) == v->original) {
-                v->owns_original = false;
-            }
+        /* Check if a downsampled thumbnail is already in thumb_cache */
+        SDL_Surface *thumb = cache_get(v->thumb_cache, path);
+        if (thumb) {
+            v->original = thumb;
+            v->owns_original = false;
+            v->showing_thumbnail = true;
         } else {
-            /* Already cached by prefetcher thread, keep our loaded copy as owned */
+            /* Cache miss & thumbnail miss — load from file synchronously */
+            v->original = loader_load_static(path);
+            if (!v->original) {
+                viewer_clear(v);
+                return;
+            }
             v->owns_original = true;
+
+            /* Put into cache only if another thread hasn't cached it in the meantime.
+               If successfully cached, the cache takes ownership. */
+            SDL_Surface *existing = cache_get(v->cache, path);
+            if (!existing) {
+                cache_put(v->cache, path, v->original);
+                if (cache_get(v->cache, path) == v->original) {
+                    v->owns_original = false;
+                }
+            } else {
+                /* Already cached by prefetcher thread, keep our loaded copy as owned */
+                v->owns_original = true;
+            }
         }
     }
 
@@ -406,9 +428,14 @@ void viewer_prefetch_around(Viewer *v, struct AppState *app)
 
     int center = app_current_index(app) - 1; /* convert 1-based to 0-based */
 
-    /* Build nearest-first list: +1, -1, +2, -2, … +5, -5 */
-    const char *paths[10];
+    /* Build nearest-first list: current first (if not cached), then +1, -1, +2, -2, … +5, -5 */
+    const char *paths[11];
     int n = 0;
+
+    const char *current_path = app_image_path(app, center);
+    if (current_path && !cache_get(v->cache, current_path)) {
+        paths[n++] = current_path;
+    }
 
     for (int d = 1; d <= 5; d++) {
         int fwd = center + d;
@@ -554,16 +581,37 @@ bool viewer_is_animated(const Viewer *v)
 
 bool viewer_animation_tick(Viewer *v)
 {
-    if (!v->is_animated || !v->animation) return false;
+    if (!v) return false;
+
+    bool dirty = false;
+
+    /* Check if we can swap the thumbnail for the full resolution image */
+    if (v->showing_thumbnail && v->current_path) {
+        SDL_Surface *full = cache_get(v->cache, v->current_path);
+        if (full) {
+            v->original = full;
+            v->owns_original = false;
+            v->showing_thumbnail = false;
+            viewer_apply_rotation(v);
+            if (v->viewport_w > 0) {
+                viewer_zoom_fit(v);
+            }
+            dirty = true;
+        }
+    }
+
+    if (!v->is_animated || !v->animation) {
+        return dirty;
+    }
 
     int count = anim_frame_count(v->animation);
-    if (count <= 1) return false;
+    if (count <= 1) return dirty;
 
     int delay = anim_get_delay(v->animation, v->anim_frame);
     Uint64 now = SDL_GetTicks();
 
     if (now - v->anim_last_tick < (Uint64)delay) {
-        return false;
+        return dirty;
     }
 
     v->anim_last_tick += delay;
@@ -583,17 +631,14 @@ bool viewer_animation_tick(Viewer *v)
         v->original = SDL_DuplicateSurface(frame);
         v->owns_original = true;
 
-        /* Regenerate texture from the new frame */
+        /* Regenerate texture from the new frame, reusing it if possible */
         if (v->rotation_degrees == 0) {
-            SDL_DestroyTexture(v->texture);
-            v->texture = SDL_CreateTextureFromSurface(v->renderer, v->original);
-            if (v->texture) {
-                SDL_SetTextureScaleMode(v->texture, SDL_SCALEMODE_LINEAR);
-            }
+            update_texture_from_surface(v, v->original);
         } else {
             viewer_apply_rotation(v);
         }
+        dirty = true;
     }
 
-    return true;
+    return dirty;
 }

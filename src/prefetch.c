@@ -11,6 +11,8 @@
 /* Maximum paths per submit batch (defensive limit) */
 #define MAX_PREFETCH_PATHS 64
 
+#define NUM_WORKERS 3
+
 struct Prefetcher {
     ImageCache *cache;            /* borrowed, already mutex-protected */
 
@@ -23,7 +25,7 @@ struct Prefetcher {
     unsigned int generation;      /* bumped on every prefetch_submit */
     bool   shutdown;
 
-    pthread_t thread;
+    pthread_t threads[NUM_WORKERS];
 };
 
 /* Free all paths in the queue (caller must hold mutex). */
@@ -116,11 +118,22 @@ Prefetcher *prefetch_create(ImageCache *cache)
         return NULL;
     }
 
-    if (pthread_create(&pf->thread, NULL, worker_func, pf) != 0) {
-        pthread_cond_destroy(&pf->cond);
-        pthread_mutex_destroy(&pf->mutex);
-        free(pf);
-        return NULL;
+    for (int i = 0; i < NUM_WORKERS; i++) {
+        if (pthread_create(&pf->threads[i], NULL, worker_func, pf) != 0) {
+            /* On failure, signal shutdown and clean up already created threads */
+            pthread_mutex_lock(&pf->mutex);
+            pf->shutdown = true;
+            pthread_cond_broadcast(&pf->cond);
+            pthread_mutex_unlock(&pf->mutex);
+
+            for (int j = 0; j < i; j++) {
+                pthread_join(pf->threads[j], NULL);
+            }
+            pthread_cond_destroy(&pf->cond);
+            pthread_mutex_destroy(&pf->mutex);
+            free(pf);
+            return NULL;
+        }
     }
 
     return pf;
@@ -131,13 +144,15 @@ void prefetch_destroy(Prefetcher *pf)
     if (!pf)
         return;
 
-    /* Signal shutdown and wake the worker. */
+    /* Signal shutdown and wake all workers. */
     pthread_mutex_lock(&pf->mutex);
     pf->shutdown = true;
-    pthread_cond_signal(&pf->cond);
+    pthread_cond_broadcast(&pf->cond);
     pthread_mutex_unlock(&pf->mutex);
 
-    pthread_join(pf->thread, NULL);
+    for (int i = 0; i < NUM_WORKERS; i++) {
+        pthread_join(pf->threads[i], NULL);
+    }
 
     /* Clean up remaining queue entries. */
     clear_queue_locked(pf);  /* safe — worker has exited */
@@ -179,6 +194,6 @@ void prefetch_submit(Prefetcher *pf, const char **paths, int count)
     pf->queue_pos = 0;
     pf->generation++;
 
-    pthread_cond_signal(&pf->cond);
+    pthread_cond_broadcast(&pf->cond);
     pthread_mutex_unlock(&pf->mutex);
 }

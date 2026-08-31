@@ -1,5 +1,5 @@
 project('frame', 'c',
-  version: '1.3.4',
+  version: '1.3.5',
   default_options: [
     'c_std=c11',
     'warning_level=3',

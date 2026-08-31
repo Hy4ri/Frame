@@ -1,19 +1,11 @@
 #define _GNU_SOURCE
 #include "overlay.h"
 #include "viewer.h"
+#include "font.h"
 #include <SDL3_ttf/SDL_ttf.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-static const char *font_paths[] = {
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/TTF/DejaVuSans.ttf",
-    "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-    "/run/current-system/sw/share/X11/fonts/DejaVuSans.ttf",
-    NULL
-};
 
 static TTF_Font *body_font = NULL;
 static TTF_Font *title_font = NULL;
@@ -77,29 +69,35 @@ bool overlay_init(void)
         return false;
     }
 
-    for (int i = 0; font_paths[i]; i++) {
-        body_font = TTF_OpenFont(font_paths[i], 14.0f);
+    /* Resolve system font once, then open at three sizes.
+     * WHY: fontconfig query is relatively expensive and should use a
+     * single consistent family file for all overlay text. Falling back
+     * via the shared resolver keeps behaviour uniform across modules. */
+    char *system_path = font_get_system_path();
+    if (system_path) {
+        body_font = TTF_OpenFont(system_path, 14.0f);
         if (body_font) {
-            title_font = TTF_OpenFont(font_paths[i], 22.0f);
-            help_font = TTF_OpenFont(font_paths[i], 16.0f);
+            title_font = TTF_OpenFont(system_path, 22.0f);
+            help_font = TTF_OpenFont(system_path, 16.0f);
             if (!title_font) {
                 title_font = body_font;
             }
             if (!help_font) {
                 help_font = body_font;
             }
-            break;
         }
+        free(system_path);
     }
 
     if (!body_font) {
-        fprintf(stderr, "No font found, overlays disabled\n");
+        fprintf(stderr,
+                "No font found, overlays disabled - install fonts-dejavu-core or check fontconfig\n");
         TTF_Quit();
         return false;
     }
 
     if (!title_font) {
-        title_font = body_font; /* fallback */
+        title_font = body_font;
     }
     if (!help_font) {
         help_font = body_font;

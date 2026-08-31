@@ -16,6 +16,11 @@ sdl3_ttf_dep = dependency('sdl3-ttf')
 libexif_dep = dependency('libexif')
 thread_dep = dependency('threads')
 m_dep = cc.find_library('m', required: false)
+fontconfig_dep = dependency('fontconfig', required: false)
+
+if fontconfig_dep.found()
+  add_project_arguments('-DHAVE_FONTCONFIG', language: 'c')
+endif
 
 sources = [
   'src/main.c',
@@ -31,11 +36,12 @@ sources = [
   'src/exif.c',
   'src/prefetch.c',
   'src/search.c',
+  'src/font.c',
 ]
 
 executable('frame',
   sources,
-  dependencies: [sdl3_dep, sdl3_image_dep, sdl3_ttf_dep, libexif_dep, thread_dep, m_dep],
+  dependencies: [sdl3_dep, sdl3_image_dep, sdl3_ttf_dep, libexif_dep, thread_dep, m_dep, fontconfig_dep],
   c_args: ['-DFRAME_VERSION="' + meson.project_version() + '"'],
   install: true,
 )

@@ -63,11 +63,6 @@ meson setup build && ninja -C build
 ./build/frame /path/to/image.jpg
 ```
 
-**Using Makefile:**
-```bash
-make && ./frame /path/to/image.jpg
-```
-
 ### Dependencies
 
 | Dependency | Purpose | Required |
@@ -76,6 +71,7 @@ make && ./frame /path/to/image.jpg
 | [SDL3_image](https://github.com/libsdl-org/SDL_image) | Image format loading | Yes |
 | [SDL3_ttf](https://github.com/libsdl-org/SDL_ttf) | Font rendering for overlays | Yes |
 | [libexif](https://github.com/libexif/libexif) | EXIF metadata extraction | Yes |
+| [fontconfig](https://www.freedesktop.org/wiki/Software/fontconfig/) | System font discovery (sans-serif) | No (recommended) |
 | Meson / Ninja | Build system | Build only |
 | pkg-config | Dependency discovery | Build only |
 
@@ -126,7 +122,7 @@ Frame scans the directory for all supported image files, sorts them alphabetical
 |---|---|
 | **"SDL_Init failed"** | Ensure SDL3 is installed and a display server (Wayland/X11) is running. |
 | **No images found** | Only supported extensions are scanned: `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.bmp`, `.tiff`, `.tif`, `.ico`, `.apng`. |
-| **No overlays shown** | Frame needs DejaVuSans.ttf or LiberationSans-Regular.ttf. Install `fonts-dejavu-core` or `liberation-fonts`. |
+| **No overlays shown** | Frame now uses your system font via fontconfig. If none found, install `fonts-dejavu-core`, `liberation-fonts` or `fonts-noto-core`. |
 | **Animation not playing** | Only GIF and APNG support animation. Some files may be static variants. |
 
 ---

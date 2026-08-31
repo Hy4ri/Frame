@@ -67,6 +67,7 @@
           sdl3-image
           sdl3-ttf
           libexif
+          fontconfig
           clang-tools
         ];
 

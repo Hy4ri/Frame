@@ -4,6 +4,7 @@
 #include "viewer.h"
 #include "cache.h"
 #include "loader.h"
+#include "font.h"
 #include <SDL3_ttf/SDL_ttf.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -139,18 +140,11 @@ static void rebuild_query_texture(SDL_Renderer *renderer) {
 }
 
 void search_init(void) {
-    /* Fonts will be retrieved from the overlay system or local font search */
-    const char *font_paths[] = {
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/TTF/DejaVuSans.ttf",
-        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-        "/run/current-system/sw/share/X11/fonts/DejaVuSans.ttf",
-        NULL
-    };
-    for (int i = 0; font_paths[i]; i++) {
-        search_font = TTF_OpenFont(font_paths[i], 16.0f);
-        if (search_font) break;
+    /* Use shared system font resolver (fontconfig + fallback chain). */
+    search_font = font_open_system_font(16.0f);
+    if (!search_font) {
+        fprintf(stderr,
+                "search: no font found - install fonts-dejavu-core or check fontconfig\n");
     }
     for (int i = 0; i < MAX_VISIBLE_TEX; i++) {
         visible_textures[i].texture = NULL;

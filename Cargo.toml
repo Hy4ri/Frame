@@ -1,0 +1,20 @@
+[package]
+name = "frame"
+version = "2.0.0"
+edition = "2024"
+
+[dependencies]
+gpui = { package = "gpui-pre", version = "0.3.6" }
+gpui-component = "0.6.6"
+gpui-kit = { version = "0.6", default-features = true }
+image = { version = "0.25", features = ["jpeg", "png", "gif", "webp", "bmp", "tiff", "ico"] }
+trash = "5.2"
+kamadak-exif = "0.5"
+fuzzy-matcher = "0.3"
+parking_lot = "0.12"
+log = "0.4"
+env_logger = "0.11"
+anyhow = "1"
+smallvec = "1"
+rayon = "1.12"
+notify = "8.2"

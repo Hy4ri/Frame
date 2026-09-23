@@ -9,12 +9,6 @@ frame
 # Test binary
 *.test
 
-# Output of go coverage
-*.out
-
-# Go build cache
-__debug_bin*
-
 # IDE/Editor
 .idea/
 .vscode/
@@ -28,14 +22,13 @@ Thumbs.db
 
 # Build artifacts
 build/
+target/
 *.o
 
 # Nix
 result
 result-*
 
-# Vendor (managed by go mod)
-vendor/
-
-#env
+# Env / direnv
+.direnv
 *.direnv

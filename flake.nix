@@ -25,12 +25,14 @@
 
         nativeBuildInputs = with pkgs; [
           autoPatchelfHook
+          makeWrapper
         ];
 
         buildInputs = with pkgs; [
           libxcb
           libxkbcommon
           stdenv.cc.cc.lib
+          wayland
         ];
 
         dontConfigure = true;
@@ -38,7 +40,8 @@
 
         installPhase = ''
           mkdir -p $out/bin
-          cp frame $out/bin/
+          makeWrapper $src/frame $out/bin/frame \
+            --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath [ pkgs.wayland ]}
 
           mkdir -p $out/share/applications
           cp frame.desktop $out/share/applications/frame.desktop

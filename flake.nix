@@ -29,9 +29,12 @@
         ];
 
         buildInputs = with pkgs; [
+          libglvnd
           libxcb
           libxkbcommon
+          mesa
           stdenv.cc.cc.lib
+          vulkan-loader
           wayland
         ];
 
@@ -40,8 +43,11 @@
 
         installPhase = ''
           mkdir -p $out/bin
-          makeWrapper $src/frame $out/bin/frame \
-            --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath [ pkgs.wayland ]}
+          cp $src/frame $out/bin/frame-real
+          chmod u+w $out/bin/frame-real
+          autoPatchelf $out/bin/frame-real
+          makeWrapper $out/bin/frame-real $out/bin/frame \
+            --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath [ pkgs.wayland pkgs.libglvnd pkgs.mesa pkgs.vulkan-loader ]}
 
           mkdir -p $out/share/applications
           cp frame.desktop $out/share/applications/frame.desktop

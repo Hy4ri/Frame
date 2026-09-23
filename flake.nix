@@ -12,33 +12,37 @@
         inherit system;
         overlays = [ self.overlays.default ];
       };
-      rustPlatform = pkgs.makeRustPlatform {
-        cargo = pkgs.cargo;
-        rustc = pkgs.rustc;
-      };
     in {
-      packages.default = rustPlatform.buildRustPackage rec {
+      packages.default = pkgs.stdenv.mkDerivation rec {
         pname = "frame";
         version = "2.0.0";
 
-        src = ./.;
-
-        cargoLock = {
-          lockFile = ./Cargo.lock;
+        src = pkgs.fetchzip {
+          url = "https://github.com/Hy4ri/Frame/releases/download/v${version}/frame-linux-x86_64.tar.gz";
+          hash = "sha256-BTw62B32mvvPA6vPIWVVAPAPp8pCwbMcJiTr1ta9ctE=";
+          stripRoot = false;
         };
 
         nativeBuildInputs = with pkgs; [
-          pkg-config
+          autoPatchelfHook
         ];
 
         buildInputs = with pkgs; [
-          fontconfig
-          freetype
           libxcb
           libxkbcommon
-          wayland
-          vulkan-loader
+          stdenv.cc.cc.lib
         ];
+
+        dontConfigure = true;
+        dontBuild = true;
+
+        installPhase = ''
+          mkdir -p $out/bin
+          cp frame $out/bin/
+
+          mkdir -p $out/share/applications
+          cp frame.desktop $out/share/applications/frame.desktop
+        '';
 
         meta = with pkgs.lib; {
           description = "A minimal image viewer for Linux with vim keybindings";

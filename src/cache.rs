@@ -36,6 +36,11 @@ impl ImageCache {
         }
     }
 
+    pub fn contains(&self, path: &Path) -> bool {
+        let inner = self.inner.lock();
+        inner.entries.contains_key(path)
+    }
+
     pub fn get(&self, path: &Path) -> Option<Arc<RenderImage>> {
         let mut inner = self.inner.lock();
         if let Some(entry) = inner.entries.get(path) {
@@ -78,13 +83,9 @@ impl ImageCache {
         }
 
         inner.total_bytes += byte_size;
-        inner.entries.insert(
-            path.clone(),
-            CacheEntry {
-                image,
-                byte_size,
-            },
-        );
+        inner
+            .entries
+            .insert(path.clone(), CacheEntry { image, byte_size });
         inner.order.push_back(path);
     }
 

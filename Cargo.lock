@@ -2040,6 +2040,7 @@ name = "frame"
 version = "2.0.0"
 dependencies = [
  "anyhow",
+ "async-channel",
  "env_logger",
  "fuzzy-matcher",
  "gpui-component",

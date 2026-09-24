@@ -4,9 +4,9 @@ use crate::prefetch::Prefetcher;
 use gpui::prelude::FluentBuilder;
 use gpui::{
     canvas, div, px, rgb, AppContext, Context, Corners, EventEmitter, InteractiveElement,
-    IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window,
+    IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
 };
-use gpui_component::input::{Input, InputState};
+use gpui_component::input::{Input, InputEvent, InputState};
 use std::sync::Arc;
 
 pub const GRID_COLS: usize = 5;
@@ -20,6 +20,7 @@ pub struct SearchView {
     pub scroll_offset: usize,
     pub thumb_cache: Arc<ImageCache>,
     pub all_images: Vec<std::path::PathBuf>,
+    _input_sub: Subscription,
 }
 
 pub enum SearchEvent {
@@ -40,6 +41,30 @@ impl SearchView {
             InputState::new(window, cx).placeholder("Type to search images...")
         });
 
+        input_state.update(cx, |input, cx| {
+            input.focus(window, cx);
+        });
+
+        let app_state_images = app_state.images.clone();
+        let input_sub = cx.subscribe(&input_state, move |this: &mut Self, entity, event: &InputEvent, cx| {
+            match event {
+                InputEvent::Change => {
+                    let text = entity.read(cx).text().to_string();
+                    this.query = text;
+                    this.update_filter_with_images(&app_state_images);
+                    cx.notify();
+                }
+                InputEvent::PressEnter { .. } => {
+                    if let Some(&app_idx) = this.filtered_indices.get(this.selected_grid_idx) {
+                        cx.emit(SearchEvent::Select(app_idx));
+                    } else {
+                        cx.emit(SearchEvent::Close);
+                    }
+                }
+                _ => {}
+            }
+        });
+
         let mut search = Self {
             query: String::new(),
             input_state,
@@ -48,6 +73,7 @@ impl SearchView {
             scroll_offset: 0,
             thumb_cache,
             all_images: app_state.images.clone(),
+            _input_sub: input_sub,
         };
 
         search.update_filter(app_state);
@@ -55,9 +81,12 @@ impl SearchView {
     }
 
     pub fn update_filter(&mut self, app_state: &AppState) {
+        self.update_filter_with_images(&app_state.images);
+    }
+
+    pub fn update_filter_with_images(&mut self, images: &[std::path::PathBuf]) {
         let q = self.query.to_ascii_lowercase();
-        self.filtered_indices = app_state
-            .images
+        self.filtered_indices = images
             .iter()
             .enumerate()
             .filter_map(|(idx, path)| {

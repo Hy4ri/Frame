@@ -10,7 +10,7 @@ use crate::viewer::ViewerState;
 use crate::watcher::{DirEvent, DirWatcher};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    canvas, div, px, rgb, AppContext, Context, Entity, InteractiveElement, IntoElement,
+    canvas, div, px, rgb, AppContext, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render,
     ScrollWheelEvent, Styled, Window,
 };
@@ -44,6 +44,7 @@ pub struct FrameApp {
     pub nav_pending: bool,
 
     pub is_fullscreen: bool,
+    pub focus_handle: FocusHandle,
 }
 
 impl FrameApp {
@@ -61,6 +62,9 @@ impl FrameApp {
             None
         };
 
+        let focus_handle = cx.focus_handle();
+        focus_handle.focus(window, cx);
+
         let mut app = Self {
             app_state,
             viewer: ViewerState::default(),
@@ -76,6 +80,7 @@ impl FrameApp {
             last_nav_time: Instant::now(),
             nav_pending: false,
             is_fullscreen: false,
+            focus_handle,
         };
 
         if app.app_state.current_path().is_some() {
@@ -348,16 +353,19 @@ impl FrameApp {
             SearchView::new(window, cx, self.thumb_cache.clone(), &self.app_state)
         });
 
-        cx.subscribe(&search_view, |this: &mut Self, _, event: &SearchEvent, cx| match event {
+        cx.subscribe_in(&search_view, window, move |this: &mut Self, _, event: &SearchEvent, window, cx| match event {
             SearchEvent::Select(idx) => {
                 this.app_state.set_index(*idx);
                 this.search_active = false;
                 this.search_view = None;
+                this.load_current_image(window, cx);
+                this.focus_handle.focus(window, cx);
                 cx.notify();
             }
             SearchEvent::Close => {
                 this.search_active = false;
                 this.search_view = None;
+                this.focus_handle.focus(window, cx);
                 cx.notify();
             }
         })
@@ -368,7 +376,7 @@ impl FrameApp {
         cx.notify();
     }
 
-    pub fn on_close_overlay(&mut self, _: &CloseOverlay, _window: &mut Window, cx: &mut Context<Self>) {
+    pub fn on_close_overlay(&mut self, _: &CloseOverlay, window: &mut Window, cx: &mut Context<Self>) {
         if self.search_active {
             if let Some(ref view) = self.search_view {
                 view.update(cx, |_, cx| {
@@ -381,6 +389,7 @@ impl FrameApp {
         self.info_dialog_open = false;
         self.help_dialog_open = false;
         self.g_sequence = false;
+        self.focus_handle.focus(window, cx);
         cx.notify();
     }
 
@@ -453,9 +462,11 @@ impl Render for FrameApp {
         }
 
         let search_view = self.search_view.clone();
+        let key_context = if self.search_active { "Search" } else { "Viewer" };
 
         div()
-            .key_context("Viewer")
+            .track_focus(&self.focus_handle)
+            .key_context(key_context)
             .id("main-frame")
             .size_full()
             .bg(rgb(0x1E1E1E))
@@ -479,7 +490,10 @@ impl Render for FrameApp {
             .on_action(cx.listener(Self::on_quit))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, event: &MouseDownEvent, _win, cx| {
+                cx.listener(|this, event: &MouseDownEvent, win, cx| {
+                    if !this.search_active && !this.info_dialog_open && !this.help_dialog_open {
+                        this.focus_handle.focus(win, cx);
+                    }
                     this.viewer.begin_drag(event.position);
                     cx.notify();
                 }),
@@ -615,8 +629,9 @@ impl Render for FrameApp {
                                             Button::new("close-info")
                                                 .label("Close")
                                                 .primary()
-                                                .on_click(cx.listener(|this, _, _win, cx| {
+                                                .on_click(cx.listener(|this, _, win, cx| {
                                                     this.info_dialog_open = false;
+                                                    this.focus_handle.focus(win, cx);
                                                     cx.notify();
                                                 })),
                                         ),
@@ -698,8 +713,9 @@ impl Render for FrameApp {
                                             Button::new("close-help")
                                                 .label("Close")
                                                 .primary()
-                                                .on_click(cx.listener(|this, _, _win, cx| {
+                                                .on_click(cx.listener(|this, _, win, cx| {
                                                     this.help_dialog_open = false;
+                                                    this.focus_handle.focus(win, cx);
                                                     cx.notify();
                                                 })),
                                         ),

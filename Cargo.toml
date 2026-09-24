@@ -18,3 +18,8 @@ anyhow = "1"
 smallvec = "1"
 rayon = "1.12"
 notify = "8.2"
+
+[dev-dependencies]
+gpui = { package = "gpui-pre", version = "0.3.6", features = ["test-support"] }
+tempfile = "3.27"
+

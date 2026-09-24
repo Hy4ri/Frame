@@ -29,5 +29,6 @@ pub fn register(cx: &mut App) {
         KeyBinding::new("/", OpenSearch, Some("Viewer")),
         KeyBinding::new("q", Quit, Some("Viewer")),
         KeyBinding::new("escape", CloseOverlay, Some("Viewer")),
-    ]);
+        KeyBinding::new("escape", CloseOverlay, Some("Search")),
+        ]);
 }

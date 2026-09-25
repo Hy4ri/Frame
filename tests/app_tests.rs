@@ -42,6 +42,7 @@ fn test_natural_sort() {
 }
 
 #[test]
+#[allow(clippy::field_reassign_with_default)]
 fn test_app_state_navigation() {
     let mut state = frame::app_state::AppState::default();
     state.images = vec![
@@ -76,6 +77,7 @@ fn test_app_state_navigation() {
 }
 
 #[test]
+#[allow(clippy::field_reassign_with_default)]
 fn test_app_state_live_directory_ops() {
     let mut state = frame::app_state::AppState::default();
     state.images = vec![PathBuf::from("a.png"), PathBuf::from("c.png")];
@@ -221,4 +223,23 @@ fn test_watcher_event_mapping() {
         attrs: Default::default(),
     };
     assert_eq!(map_event(ev), vec![DirEvent::Removed(p1.clone())]);
+}
+
+#[test]
+#[allow(clippy::field_reassign_with_default)]
+fn test_viewer_reset_clears_animation_and_images() {
+    use frame::viewer::ViewerState;
+    use std::path::Path;
+
+    let mut viewer = ViewerState::default();
+    viewer.is_animated = true;
+    viewer.is_thumbnail = true;
+
+    viewer.reset_for_path(Path::new("test.png"));
+
+    assert_eq!(viewer.current_path, Some(PathBuf::from("test.png")));
+    assert!(!viewer.is_animated);
+    assert!(!viewer.is_thumbnail);
+    assert!(viewer.base_image.is_none());
+    assert!(viewer.display_image.is_none());
 }

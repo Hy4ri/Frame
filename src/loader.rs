@@ -21,7 +21,7 @@ pub fn is_animated(path: &Path) -> bool {
 }
 
 fn rgba_to_bgra(buffer: &mut RgbaImage) {
-    for pixel in buffer.chunks_exact_mut(4) {
+    for pixel in buffer.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
 }
@@ -51,6 +51,7 @@ pub fn load_static(path: &Path) -> Result<Arc<RenderImage>> {
     Ok(Arc::new(render_image))
 }
 
+#[allow(clippy::collapsible_if)]
 pub fn load_image(path: &Path) -> Result<Arc<RenderImage>> {
     let ext = path
         .extension()

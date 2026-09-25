@@ -23,6 +23,7 @@ pub struct SearchView {
     pub selected_grid_idx: usize,
     pub scroll_offset: usize,
     pub thumb_cache: Arc<ImageCache>,
+    pub prefetcher: Prefetcher,
     pub all_images: Vec<PathBuf>,
     matcher: SkimMatcherV2,
     _input_sub: Subscription,
@@ -78,6 +79,7 @@ impl SearchView {
             selected_grid_idx: 0,
             scroll_offset: 0,
             thumb_cache,
+            prefetcher: prefetcher.clone(),
             all_images: app_state.images.clone(),
             matcher: SkimMatcherV2::default(),
             _input_sub: input_sub,
@@ -110,7 +112,7 @@ impl SearchView {
                 })
                 .collect();
 
-            matches.sort_by(|a, b| b.0.cmp(&a.0));
+            matches.sort_by_key(|a| std::cmp::Reverse(a.0));
             self.filtered_paths = matches.into_iter().map(|(_, p)| p).collect();
         }
 
@@ -132,9 +134,7 @@ impl SearchView {
     fn request_thumbnails_internal(&self, cx: &mut Context<Self>) {
         let paths = self.visible_paths();
         if !paths.is_empty() {
-            let thumb_cache = self.thumb_cache.clone();
-            let prefetcher = Prefetcher::new(thumb_cache.clone(), thumb_cache.clone());
-            prefetcher.prefetch_thumbnails(paths, cx);
+            self.prefetcher.prefetch_thumbnails(paths, cx);
         }
     }
 

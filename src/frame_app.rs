@@ -99,7 +99,7 @@ impl FrameApp {
             while let Ok(event) = watcher_rx.recv().await {
                 if let Some(this) = this.upgrade() {
                     let mut needs_reload = false;
-                    let _ = this.update(cx, |app, cx| {
+                    this.update(cx, |app, cx| {
                         match event {
                             DirEvent::Created(path) => {
                                 app.app_state.insert_sorted(path);
@@ -155,7 +155,7 @@ impl FrameApp {
 
                     if needs_reload {
                         let entity = this.clone();
-                        let _ = cx.update(|cx| {
+                        cx.update(|cx| {
                             if let Some(handle) = cx.windows().first().copied() {
                                 let _ = handle.update(cx, |_, win, cx| {
                                     entity.update(cx, |this, cx| {
@@ -206,7 +206,7 @@ impl FrameApp {
                     .await;
 
                 if let Some(this) = this.upgrade() {
-                    let _ = this.update(cx, |app, cx| {
+                    this.update(cx, |app, cx| {
                         if app.viewer.advance_frame() {
                             cx.notify();
                         }
@@ -219,6 +219,7 @@ impl FrameApp {
     }
 
     fn load_current_image(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.anim_task = None;
         let path = match self.app_state.current_path() {
             Some(p) => p.to_path_buf(),
             None => {
@@ -264,7 +265,7 @@ impl FrameApp {
             let (decoded_path, res) = decode_result;
 
             if let Some(this) = this.upgrade() {
-                let _ = this.update(cx, |app, cx| {
+                this.update(cx, |app, cx| {
                     if app.app_state.current_path() == Some(&decoded_path) {
                         match res {
                             Ok(img) => {
@@ -275,6 +276,7 @@ impl FrameApp {
                                 app.trigger_prefetch(cx);
                             }
                             Err(e) => {
+                                app.anim_task = None;
                                 app.viewer.set_error(format!("Can't decode: {}", e));
                             }
                         }
@@ -307,6 +309,7 @@ impl FrameApp {
                 curr.checked_sub((-d) as usize)
             };
 
+            #[allow(clippy::collapsible_if)]
             if let Some(idx) = target_idx {
                 if idx < count {
                     if let Some(p) = self.app_state.images.get(idx) {
@@ -342,7 +345,7 @@ impl FrameApp {
                 .await;
             if let Some(this) = this.upgrade() {
                 let entity = this.clone();
-                let _ = this.update(cx, |_app, cx| {
+                this.update(cx, |_app, cx| {
                     if let Some(handle) = cx.windows().first().copied() {
                         let _ = handle.update(cx, |_, win, cx| {
                             entity.update(cx, |this, cx| {
@@ -537,11 +540,14 @@ impl FrameApp {
         cx.subscribe(
             &input_state,
             move |_this: &mut Self, _, event: &InputEvent, cx| {
+                #[allow(clippy::collapsible_if)]
                 if let InputEvent::PressEnter { .. } = event {
                     if let Some(handle) = cx.windows().first().copied() {
                         let submit_fn = submit_rename.clone();
                         let _ = handle.update(cx, |_, win, cx| {
-                            submit_fn(win, cx);
+                            if submit_fn(win, cx) {
+                                win.close_dialog(cx);
+                            }
                         });
                     }
                 }
@@ -822,7 +828,7 @@ impl Render for FrameApp {
                 });
 
                 let (name, size, fmt) = file_info.unwrap_or_default();
-                let exif_list = path_opt.and_then(|p| get_exif_data(p)).unwrap_or_default();
+                let exif_list = path_opt.and_then(get_exif_data).unwrap_or_default();
 
                 parent.child(
                     div()

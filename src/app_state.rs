@@ -155,6 +155,7 @@ impl AppState {
         self.current_index.map(|i| i + 1).unwrap_or(0)
     }
 
+    #[allow(clippy::should_implement_trait, clippy::collapsible_if)]
     pub fn next(&mut self) -> bool {
         if let Some(idx) = self.current_index {
             if idx + 1 < self.images.len() {
@@ -165,6 +166,7 @@ impl AppState {
         false
     }
 
+    #[allow(clippy::collapsible_if)]
     pub fn prev(&mut self) -> bool {
         if let Some(idx) = self.current_index {
             if idx > 0 {
@@ -202,6 +204,7 @@ impl AppState {
         false
     }
 
+    #[allow(clippy::collapsible_if)]
     pub fn remove_current(&mut self) -> Option<PathBuf> {
         if let Some(idx) = self.current_index {
             if idx < self.images.len() {
@@ -267,6 +270,7 @@ impl AppState {
         }
     }
 
+    #[allow(clippy::collapsible_if)]
     pub fn rename_current(&mut self, new_path: PathBuf) {
         if let Some(idx) = self.current_index {
             if idx < self.images.len() {

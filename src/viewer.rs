@@ -55,6 +55,10 @@ impl Default for ViewerState {
 impl ViewerState {
     pub fn reset_for_path(&mut self, path: &Path) {
         self.current_path = Some(path.to_path_buf());
+        self.base_image = None;
+        self.display_image = None;
+        self.is_thumbnail = false;
+        self.is_animated = false;
         self.rotation = Rotation::R0;
         self.scale = 1.0;
         self.offset = point(px(0.0), px(0.0));

@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+#[derive(Clone)]
 pub struct Prefetcher {
     image_cache: Arc<ImageCache>,
     thumb_cache: Arc<ImageCache>,
@@ -49,10 +50,11 @@ impl Prefetcher {
         }
 
         cx.spawn(async move |this, cx| {
+            let to_process = filtered_paths.clone();
             let results: Vec<_> = cx
                 .background_executor()
                 .spawn(async move {
-                    filtered_paths
+                    to_process
                         .par_iter()
                         .filter_map(|path| {
                             if generation.load(Ordering::SeqCst) != current_gen {
@@ -68,8 +70,10 @@ impl Prefetcher {
                 .await;
 
             let mut in_flight_guard = in_flight.lock();
+            for path in &filtered_paths {
+                in_flight_guard.remove(path);
+            }
             for (path, img, thumb) in results {
-                in_flight_guard.remove(&path);
                 if let Some(t) = thumb {
                     let bytes = calc_image_bytes(&t);
                     thumb_cache.put(path.clone(), t, bytes);
@@ -79,7 +83,7 @@ impl Prefetcher {
             }
 
             if let Some(this) = this.upgrade() {
-                let _ = this.update(cx, |_, cx| {
+                this.update(cx, |_, cx| {
                     cx.notify();
                 });
             }
@@ -104,10 +108,11 @@ impl Prefetcher {
         }
 
         cx.spawn(async move |this, cx| {
+            let to_process = filtered_paths.clone();
             let results: Vec<_> = cx
                 .background_executor()
                 .spawn(async move {
-                    filtered_paths
+                    to_process
                         .par_iter()
                         .filter_map(|path| {
                             load_image(path).ok().and_then(|img| {
@@ -119,14 +124,16 @@ impl Prefetcher {
                 .await;
 
             let mut in_flight_guard = in_flight.lock();
+            for path in &filtered_paths {
+                in_flight_guard.remove(path);
+            }
             for (path, thumb) in results {
-                in_flight_guard.remove(&path);
                 let bytes = calc_image_bytes(&thumb);
                 thumb_cache.put(path, thumb, bytes);
             }
 
             if let Some(this) = this.upgrade() {
-                let _ = this.update(cx, |_, cx| {
+                this.update(cx, |_, cx| {
                     cx.notify();
                 });
             }

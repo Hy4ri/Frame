@@ -6,6 +6,9 @@ use std::io::Write;
 
 #[gpui::test]
 fn test_keyboard_navigation_startup(cx: &mut TestAppContext) {
+    unsafe {
+        std::env::set_var("FRAME_TEST", "1");
+    }
     cx.update(|cx| {
         gpui_kit::init(cx);
         frame::keybindings::register(cx);
@@ -46,4 +49,14 @@ fn test_keyboard_navigation_startup(cx: &mut TestAppContext) {
         Some(1),
         "Shortcuts should advance current image on startup without click"
     );
+
+    // Test gg jumps to first
+    cx.simulate_keystrokes("g g");
+    let idx_first = cx.update(|_window, cx| app.read(cx).app_state.current_index);
+    assert_eq!(idx_first, Some(0));
+
+    // Test G jumps to last
+    cx.simulate_keystrokes("shift-g");
+    let idx_last = cx.update(|_window, cx| app.read(cx).app_state.current_index);
+    assert_eq!(idx_last, Some(2));
 }

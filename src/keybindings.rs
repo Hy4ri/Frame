@@ -11,9 +11,14 @@ pub fn register(cx: &mut App) {
         KeyBinding::new("h", PrevImage, Some("Viewer")),
         KeyBinding::new("up", PrevImage, Some("Viewer")),
         KeyBinding::new("k", PrevImage, Some("Viewer")),
+        KeyBinding::new("g g", FirstImage, Some("Viewer")),
+        KeyBinding::new("home", FirstImage, Some("Viewer")),
         KeyBinding::new("shift-g", LastImage, Some("Viewer")),
+        KeyBinding::new("end", LastImage, Some("Viewer")),
         KeyBinding::new("f", ToggleFullscreen, Some("Viewer")),
         KeyBinding::new("=", ZoomIn, Some("Viewer")),
+        KeyBinding::new("+", ZoomIn, Some("Viewer")),
+        KeyBinding::new("shift-=", ZoomIn, Some("Viewer")),
         KeyBinding::new("z", ZoomIn, Some("Viewer")),
         KeyBinding::new("-", ZoomOut, Some("Viewer")),
         KeyBinding::new("x", ZoomOut, Some("Viewer")),
@@ -26,9 +31,10 @@ pub fn register(cx: &mut App) {
         KeyBinding::new("f2", RenameImage, Some("Viewer")),
         KeyBinding::new("i", ShowInfo, Some("Viewer")),
         KeyBinding::new("shift-/", ShowHelp, Some("Viewer")),
+        KeyBinding::new("?", ShowHelp, Some("Viewer")),
         KeyBinding::new("/", OpenSearch, Some("Viewer")),
         KeyBinding::new("q", Quit, Some("Viewer")),
         KeyBinding::new("escape", CloseOverlay, Some("Viewer")),
         KeyBinding::new("escape", CloseOverlay, Some("Search")),
-        ]);
+    ]);
 }

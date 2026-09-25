@@ -1,22 +1,7 @@
-mod actions;
-mod app_state;
-mod cache;
-mod cli;
-mod exif_info;
-mod file_ops;
-mod frame_app;
-mod keybindings;
-mod loader;
-mod prefetch;
-mod rotate;
-mod search;
-mod utils;
-mod viewer;
-mod watcher;
-
-use cli::CliArgs;
-use frame_app::FrameApp;
-use gpui::{px, size, Bounds, TitlebarOptions, WindowBounds, WindowOptions};
+use frame::cli::CliArgs;
+use frame::frame_app::FrameApp;
+use frame::keybindings;
+use gpui::{Bounds, TitlebarOptions, WindowBounds, WindowOptions, px, size};
 use gpui_kit::component::Root;
 use gpui_kit::*;
 
@@ -45,6 +30,7 @@ fn main() {
                     title: Some("Frame".into()),
                     ..Default::default()
                 }),
+                app_id: Some("frame".into()),
                 ..Default::default()
             },
             |window, cx| {

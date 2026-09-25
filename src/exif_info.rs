@@ -27,9 +27,5 @@ pub fn get_exif_data(path: &Path) -> Option<Vec<(String, String)>> {
         }
     }
 
-    if data.is_empty() {
-        None
-    } else {
-        Some(data)
-    }
+    if data.is_empty() { None } else { Some(data) }
 }

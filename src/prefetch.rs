@@ -6,14 +6,12 @@ use rayon::prelude::*;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Clone)]
 pub struct Prefetcher {
     image_cache: Arc<ImageCache>,
     thumb_cache: Arc<ImageCache>,
     in_flight: Arc<Mutex<HashSet<PathBuf>>>,
-    generation: Arc<AtomicU64>,
 }
 
 impl Prefetcher {
@@ -22,20 +20,13 @@ impl Prefetcher {
             image_cache,
             thumb_cache,
             in_flight: Arc::new(Mutex::new(HashSet::new())),
-            generation: Arc::new(AtomicU64::new(0)),
         }
     }
 
-    pub fn bump_generation(&self) -> u64 {
-        self.generation.fetch_add(1, Ordering::SeqCst) + 1
-    }
-
     pub fn prefetch_paths<T: 'static>(&self, paths: Vec<PathBuf>, cx: &mut Context<T>) {
-        let current_gen = self.bump_generation();
         let image_cache = self.image_cache.clone();
         let thumb_cache = self.thumb_cache.clone();
         let in_flight = self.in_flight.clone();
-        let generation = self.generation.clone();
 
         let filtered_paths: Vec<PathBuf> = {
             let mut guard = in_flight.lock();
@@ -57,9 +48,6 @@ impl Prefetcher {
                     to_process
                         .par_iter()
                         .filter_map(|path| {
-                            if generation.load(Ordering::SeqCst) != current_gen {
-                                return None;
-                            }
                             load_image(path).ok().map(|img| {
                                 let thumb = create_thumbnail(&img, 256);
                                 (path.clone(), img, thumb)

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 #[test]
 fn test_cli_version() {
     let version = frame::cli::VERSION;
-    assert_eq!(version, "2.0.0");
+    assert_eq!(version, env!("CARGO_PKG_VERSION"));
 }
 
 #[test]

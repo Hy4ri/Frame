@@ -15,7 +15,7 @@
     in {
       packages.default = pkgs.stdenv.mkDerivation rec {
         pname = "frame";
-        version = "2.0.0";
+        version = "2.1.0";
 
         src = pkgs.fetchzip {
           url = "https://github.com/Hy4ri/Frame/releases/download/v${version}/frame-linux-x86_64.tar.gz";

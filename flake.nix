@@ -19,7 +19,7 @@
 
         src = pkgs.fetchzip {
           url = "https://github.com/Hy4ri/Frame/releases/download/v${version}/frame-linux-x86_64.tar.gz";
-          hash = "sha256-BTw62B32mvvPA6vPIWVVAPAPp8pCwbMcJiTr1ta9ctE=";
+          hash = "sha256-kvhO/5Q3VBlNn/0mcP/s81vxt+2RlHCceIh3yrUBtAo=";
           stripRoot = false;
         };
 

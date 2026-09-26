@@ -79,3 +79,41 @@ jobs:
           files: frame-linux-x86_64.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  update-flake:
+    name: Update flake.nix version and hash
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Update flake.nix
+        run: |
+          TAG=${{ inputs.tag || github.ref_name }}
+          VERSION=${TAG#v}
+          URL="https://github.com/Hy4ri/Frame/releases/download/${TAG}/frame-linux-x86_64.tar.gz"
+          # Hash exactly what fetchzip will see, from the published asset
+          HASH=$(nix hash convert --hash-algo sha256 --to sri "$(nix-prefetch-url --unpack --type sha256 "$URL")")
+          echo "version=$VERSION hash=$HASH"
+
+          sed -i -E \
+            -e "s|^(\s*version = )\"[^\"]*\";|\1\"${VERSION}\";|" \
+            -e "s|^(\s*hash = )\"sha256-[^\"]*\";|\1\"${HASH}\";|" \
+            flake.nix
+          grep -nE '^\s*(version|hash) = ' flake.nix
+
+          if git diff --quiet flake.nix; then
+            echo "flake.nix already up to date"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore(nix): update flake to ${TAG}"
+          git push origin main

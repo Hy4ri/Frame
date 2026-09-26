@@ -19,9 +19,20 @@ use gpui_component::WindowExt;
 use gpui_component::button::{Button, ButtonVariant, ButtonVariants};
 use gpui_component::dialog::{DialogAction, DialogButtonProps, DialogClose, DialogFooter};
 use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::scroll::ScrollableElement;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
+
+pub mod theme {
+    pub const BACKGROUND: u32 = 0x121212;
+    pub const SURFACE: u32 = 0x1B1B1B;
+    pub const SURFACE_RAISED: u32 = 0x242424;
+    pub const BORDER: u32 = 0x343434;
+    pub const MUTED: u32 = 0xB3B3B3;
+    pub const TEXT: u32 = 0xFFFFFF;
+    pub const ACCENT: u32 = 0x990000;
+}
 
 pub struct FrameApp {
     pub app_state: AppState,
@@ -558,20 +569,41 @@ impl FrameApp {
         window.open_dialog(cx, move |dialog, _, _| {
             let inp = input_for_sub.clone();
             let submit_action = submit_for_btn.clone();
-            dialog.title("Rename Image").child(Input::new(&inp)).footer(
-                DialogFooter::new()
-                    .gap_2()
-                    .child(
-                        DialogClose::new().child(Button::new("cancel").label("Cancel").outline()),
-                    )
-                    .child(DialogAction::new().child(
-                        Button::new("rename").label("Rename").primary().on_click(
-                            move |_, win, cx| {
-                                submit_action(win, cx);
-                            },
-                        ),
-                    )),
-            )
+            dialog
+                .max_w(px(440.0))
+                .bg(rgb(theme::SURFACE))
+                .border_color(rgb(theme::BORDER))
+                .title("Rename Image")
+                .child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .text_color(rgb(theme::MUTED))
+                                .child("FILE NAME"),
+                        )
+                        .child(Input::new(&inp)),
+                )
+                .footer(
+                    DialogFooter::new()
+                        .gap_2()
+                        .child(
+                            DialogClose::new()
+                                .child(Button::new("cancel").label("Cancel").outline()),
+                        )
+                        .child(DialogAction::new().child(
+                            Button::new("rename").label("Rename").primary().on_click(
+                                move |_, win, cx| {
+                                    submit_action(win, cx);
+                                },
+                            ),
+                        )),
+                )
         });
     }
 
@@ -667,7 +699,9 @@ impl FrameApp {
 }
 
 impl Render for FrameApp {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Root manages modal state, but the application must render its dialog layer.
+        let dialog_layer = gpui_component::Root::render_dialog_layer(window, cx);
         let search_view = self.search_view.clone();
         let key_context = if self.search_active {
             "Search"
@@ -680,7 +714,7 @@ impl Render for FrameApp {
             .key_context(key_context)
             .id("main-frame")
             .size_full()
-            .bg(rgb(0x1E1E1E))
+            .bg(rgb(theme::BACKGROUND))
             .on_action(cx.listener(Self::on_next))
             .on_action(cx.listener(Self::on_prev))
             .on_action(cx.listener(Self::on_first))
@@ -841,10 +875,10 @@ impl Render for FrameApp {
                         .child(
                             div()
                                 .w(px(500.0))
-                                .bg(rgb(0x1E1E1E))
+                                .max_w_full()
+                                .bg(rgb(theme::SURFACE))
                                 .border_1()
-                                .border_color(rgb(0x444444))
-                                .rounded_lg()
+                                .border_color(rgb(theme::BORDER))
                                 .p_4()
                                 .flex()
                                 .flex_col()
@@ -853,7 +887,7 @@ impl Render for FrameApp {
                                     div()
                                         .text_lg()
                                         .font_weight(gpui::FontWeight::BOLD)
-                                        .text_color(rgb(0xFFFFFF))
+                                        .text_color(rgb(theme::TEXT))
                                         .child("Image Information"),
                                 )
                                 .child(
@@ -884,7 +918,7 @@ impl Render for FrameApp {
                                         exif_list.into_iter().map(|(k, v)| {
                                             div()
                                                 .text_xs()
-                                                .text_color(rgb(0xCCCCCC))
+                                                .text_color(rgb(theme::MUTED))
                                                 .child(format!("{}: {}", k, v))
                                         }),
                                     )
@@ -902,6 +936,30 @@ impl Render for FrameApp {
                 )
             })
             .when(self.help_dialog_open, |parent| {
+                let section =
+                    |title: &'static str, rows: Vec<(&'static [&'static str], &'static str)>| {
+                        div()
+                            .flex_1()
+                            .min_w(px(240.0))
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .pb_1()
+                                    .border_b_1()
+                                    .border_color(rgb(theme::ACCENT))
+                                    .text_xs()
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(rgb(theme::MUTED))
+                                    .child(title),
+                            )
+                            .children(
+                                rows.into_iter()
+                                    .map(|(keys, desc)| shortcut_row(keys, desc)),
+                            )
+                    };
+
                 parent.child(
                     div()
                         .absolute()
@@ -910,85 +968,125 @@ impl Render for FrameApp {
                         .flex()
                         .items_center()
                         .justify_center()
+                        .p_4()
                         .child(
                             div()
-                                .w(px(600.0))
-                                .bg(rgb(0x1E1E1E))
+                                .w(px(640.0))
+                                .max_w_full()
+                                .max_h_full()
+                                .overflow_y_scrollbar()
+                                .bg(rgb(theme::SURFACE))
                                 .border_1()
-                                .border_color(rgb(0x444444))
-                                .rounded_lg()
-                                .p_4()
+                                .border_color(rgb(theme::BORDER))
                                 .flex()
                                 .flex_col()
-                                .gap_3()
                                 .child(
                                     div()
-                                        .text_lg()
-                                        .font_weight(gpui::FontWeight::BOLD)
-                                        .text_color(rgb(0xFFFFFF))
-                                        .child("Keyboard Shortcuts"),
-                                )
-                                .child(
-                                    div()
+                                        .px_5()
+                                        .py_4()
+                                        .border_b_1()
+                                        .border_color(rgb(theme::BORDER))
                                         .flex()
-                                        .gap_4()
+                                        .items_center()
+                                        .justify_between()
                                         .child(
                                             div()
-                                                .flex_1()
-                                                .flex()
-                                                .flex_col()
-                                                .gap_1()
-                                                .child(
-                                                    div()
-                                                        .font_weight(gpui::FontWeight::BOLD)
-                                                        .text_color(rgb(0xCC3333))
-                                                        .child("NAVIGATION"),
-                                                )
-                                                .child("h / ← : Previous image")
-                                                .child("l / → : Next image")
-                                                .child("j / ↓ : Next image")
-                                                .child("k / ↑ : Previous image")
-                                                .child("gg / Home : First image")
-                                                .child("G / End : Last image")
-                                                .child("/ : Search grid")
-                                                .child("q / Esc : Quit"),
+                                                .text_lg()
+                                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                                .text_color(rgb(theme::TEXT))
+                                                .child("Keyboard Shortcuts"),
                                         )
-                                        .child(
-                                            div()
-                                                .flex_1()
-                                                .flex()
-                                                .flex_col()
-                                                .gap_1()
-                                                .child(
-                                                    div()
-                                                        .font_weight(gpui::FontWeight::BOLD)
-                                                        .text_color(rgb(0xCC3333))
-                                                        .child("VIEW & OPS"),
-                                                )
-                                                .child("f : Fullscreen")
-                                                .child("+ / = / z : Zoom in")
-                                                .child("- / x : Zoom out")
-                                                .child("0 : Fit to window")
-                                                .child("1 : Original size")
-                                                .child("Double Click : Fit / 1:1")
-                                                .child("r / R : Rotate CW/CCW")
-                                                .child("d / Del : Delete image")
-                                                .child("F2 : Rename image")
-                                                .child("i : Image info")
-                                                .child("? : Help"),
-                                        ),
+                                        .child(keycap("Esc")),
                                 )
-                                .child(div().mt_4().flex().justify_end().child(
-                                    Button::new("close-help").label("Close").primary().on_click(
-                                        cx.listener(|this, _, win, cx| {
-                                            this.help_dialog_open = false;
-                                            this.focus_handle.focus(win, cx);
-                                            cx.notify();
-                                        }),
-                                    ),
-                                )),
+                                .child(
+                                    div()
+                                        .px_5()
+                                        .py_4()
+                                        .flex()
+                                        .flex_wrap()
+                                        .gap_6()
+                                        .child(section(
+                                            "NAVIGATION",
+                                            vec![
+                                                (&["→", "l"], "Next image"),
+                                                (&["←", "h"], "Previous image"),
+                                                (&["↓", "j"], "Next image"),
+                                                (&["↑", "k"], "Previous image"),
+                                                (&["Home", "gg"], "First image"),
+                                                (&["End", "G"], "Last image"),
+                                                (&["/"], "Search"),
+                                                (&["q", "Esc"], "Quit"),
+                                            ],
+                                        ))
+                                        .child(section(
+                                            "VIEW & FILE",
+                                            vec![
+                                                (&["f"], "Fullscreen"),
+                                                (&["+", "=", "z"], "Zoom in"),
+                                                (&["-", "x"], "Zoom out"),
+                                                (&["0"], "Fit to window"),
+                                                (&["1"], "Original size"),
+                                                (&["Dbl-click"], "Fit / 1:1"),
+                                                (&["r", "R"], "Rotate CW / CCW"),
+                                                (&["d", "Del"], "Delete image"),
+                                                (&["F2"], "Rename image"),
+                                                (&["i"], "Image info"),
+                                                (&["?"], "This help"),
+                                            ],
+                                        )),
+                                )
+                                .child(
+                                    div()
+                                        .px_5()
+                                        .py_3()
+                                        .border_t_1()
+                                        .border_color(rgb(theme::BORDER))
+                                        .flex()
+                                        .justify_end()
+                                        .child(
+                                            Button::new("close-help")
+                                                .label("Close")
+                                                .primary()
+                                                .on_click(cx.listener(|this, _, win, cx| {
+                                                    this.help_dialog_open = false;
+                                                    this.focus_handle.focus(win, cx);
+                                                    cx.notify();
+                                                })),
+                                        ),
+                                ),
                         ),
                 )
             })
+            .children(dialog_layer)
     }
+}
+
+fn keycap(label: &'static str) -> gpui::Div {
+    div()
+        .min_w(px(22.0))
+        .px_1p5()
+        .py_0p5()
+        .flex()
+        .justify_center()
+        .bg(rgb(theme::SURFACE_RAISED))
+        .border_1()
+        .border_color(rgb(theme::BORDER))
+        .text_xs()
+        .text_color(rgb(theme::TEXT))
+        .child(label)
+}
+
+fn shortcut_row(keys: &'static [&'static str], desc: &'static str) -> gpui::Div {
+    div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap_3()
+        .child(div().text_sm().text_color(rgb(theme::TEXT)).child(desc))
+        .child(
+            div()
+                .flex()
+                .gap_1()
+                .children(keys.iter().map(|k| keycap(k))),
+        )
 }

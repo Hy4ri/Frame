@@ -1,5 +1,6 @@
 use crate::app_state::AppState;
 use crate::cache::ImageCache;
+use crate::frame_app::theme;
 use crate::prefetch::Prefetcher;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -7,7 +8,7 @@ use gpui::prelude::FluentBuilder;
 use gpui::{
     AppContext, Bounds, Context, Corners, EventEmitter, InteractiveElement, IntoElement,
     ParentElement, Render, SharedString, Size, StatefulInteractiveElement, Styled, Subscription,
-    Window, canvas, div, point, px, rgb,
+    Window, canvas, div, point, px,
 };
 use gpui_component::input::{Input, InputEvent, InputState};
 use std::path::PathBuf;
@@ -210,139 +211,204 @@ impl Render for SearchView {
         div()
             .id("search-overlay")
             .size_full()
-            .bg(rgb(0x141414))
+            .bg(gpui::rgb(theme::BACKGROUND))
             .flex()
             .flex_col()
             .p_4()
             .gap_3()
             .child(
                 div()
-                    .w_full()
-                    .h(px(50.0))
-                    .bg(rgb(0x181818))
-                    .border_1()
-                    .border_color(rgb(0x990000))
-                    .rounded_md()
-                    .px_3()
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(div().flex_1().child(Input::new(&self.input_state)))
                     .child(
                         div()
-                            .text_xs()
-                            .text_color(rgb(0xAAAAAA))
-                            .child(format!("{} matches", match_count)),
-                    ),
+                            .text_lg()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(gpui::rgb(theme::TEXT))
+                            .child("Search"),
+                    )
+                    .child(div().text_xs().text_color(gpui::rgb(theme::MUTED)).child(
+                        if match_count == 1 {
+                            "1 image".to_string()
+                        } else {
+                            format!("{} images", match_count)
+                        },
+                    )),
             )
             .child(
                 div()
-                    .id("grid-container")
-                    .size_full()
-                    .flex_1()
-                    .grid()
-                    .grid_cols(GRID_COLS as u16)
-                    .gap_2()
-                    .children((0..total_cells).map(|i| {
-                        let item_idx = start_item + i;
-                        if item_idx < self.filtered_paths.len() {
-                            let is_selected = item_idx == self.selected_grid_idx;
-                            let path = self.filtered_paths[item_idx].clone();
-                            let thumb = self.thumb_cache.get(&path);
+                    .w_full()
+                    .h(px(44.0))
+                    .bg(gpui::rgb(theme::SURFACE))
+                    .border_1()
+                    .border_color(gpui::rgb(theme::ACCENT))
+                    .px_3()
+                    .flex()
+                    .items_center()
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(Input::new(&self.input_state).appearance(false)),
+                    ),
+            )
+            .when(match_count == 0, |this| {
+                this.child(
+                    div()
+                        .flex_1()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_sm()
+                        .text_color(gpui::rgb(theme::MUTED))
+                        .child("No images match"),
+                )
+            })
+            .when(match_count > 0, |this| {
+                this.child(
+                    div()
+                        .id("grid-container")
+                        .w_full()
+                        .flex_1()
+                        .grid()
+                        .grid_cols(GRID_COLS as u16)
+                        .gap_2()
+                        .children((0..total_cells).map(|i| {
+                            let item_idx = start_item + i;
+                            if item_idx < self.filtered_paths.len() {
+                                let is_selected = item_idx == self.selected_grid_idx;
+                                let path = self.filtered_paths[item_idx].clone();
+                                let thumb = self.thumb_cache.get(&path);
 
-                            let file_name = path
-                                .file_name()
-                                .and_then(|n| n.to_str())
-                                .unwrap_or("")
-                                .to_string();
+                                let file_name = path
+                                    .file_name()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or("")
+                                    .to_string();
 
-                            let path_for_click = path.clone();
+                                let path_for_click = path.clone();
 
-                            div()
-                                .id(SharedString::from(format!("cell-{}", i)))
-                                .size_full()
-                                .rounded_md()
-                                .border_1()
-                                .when(is_selected, |s| {
-                                    s.border_color(rgb(0x990000)).bg(rgb(0x3C0A0A))
-                                })
-                                .when(!is_selected, |s| {
-                                    s.border_color(rgb(0x323232)).bg(rgb(0x191919))
-                                })
-                                .p_2()
-                                .flex()
-                                .flex_col()
-                                .items_center()
-                                .justify_center()
-                                .on_click(cx.listener({
-                                    let target_path = path_for_click;
-                                    move |this, _, _win, cx| {
-                                        cx.emit(SearchEvent::Select(target_path.clone()));
-                                        this.query.clear();
-                                    }
-                                }))
-                                .child({
-                                    if let Some(render_img) = thumb {
-                                        div().size_full().flex_1().child(
-                                            canvas(
-                                                move |_bounds, _win, _cx| {},
-                                                move |bounds, (), win, _cx| {
-                                                    let img_size = render_img.size(0);
-                                                    let iw = img_size.width.0 as f32;
-                                                    let ih = img_size.height.0 as f32;
-                                                    if iw > 0.0 && ih > 0.0 {
-                                                        let bw: f32 = bounds.size.width.into();
-                                                        let bh: f32 = bounds.size.height.into();
-                                                        let scale = (bw / iw).min(bh / ih);
-                                                        let rw = iw * scale;
-                                                        let rh = ih * scale;
-                                                        let ox =
-                                                            bounds.origin.x + px((bw - rw) / 2.0);
-                                                        let oy =
-                                                            bounds.origin.y + px((bh - rh) / 2.0);
+                                div()
+                                    .id(SharedString::from(format!("cell-{}", i)))
+                                    .size_full()
+                                    .border_1()
+                                    .when(is_selected, |s| {
+                                        s.border_color(gpui::rgb(theme::ACCENT))
+                                            .bg(gpui::rgb(theme::SURFACE_RAISED))
+                                    })
+                                    .when(!is_selected, |s| {
+                                        s.border_color(gpui::rgb(theme::BORDER))
+                                            .bg(gpui::rgb(theme::SURFACE))
+                                    })
+                                    .p_2()
+                                    .flex()
+                                    .flex_col()
+                                    .items_center()
+                                    .justify_center()
+                                    .on_click(cx.listener({
+                                        let target_path = path_for_click;
+                                        move |this, _, _win, cx| {
+                                            cx.emit(SearchEvent::Select(target_path.clone()));
+                                            this.query.clear();
+                                        }
+                                    }))
+                                    .child({
+                                        if let Some(render_img) = thumb {
+                                            div().w_full().flex_1().child(
+                                                canvas(
+                                                    move |_bounds, _win, _cx| {},
+                                                    move |bounds, (), win, _cx| {
+                                                        let img_size = render_img.size(0);
+                                                        let iw = img_size.width.0 as f32;
+                                                        let ih = img_size.height.0 as f32;
+                                                        if iw > 0.0 && ih > 0.0 {
+                                                            let bw: f32 = bounds.size.width.into();
+                                                            let bh: f32 = bounds.size.height.into();
+                                                            let scale = (bw / iw).min(bh / ih);
+                                                            let rw = iw * scale;
+                                                            let rh = ih * scale;
+                                                            let ox = bounds.origin.x
+                                                                + px((bw - rw) / 2.0);
+                                                            let oy = bounds.origin.y
+                                                                + px((bh - rh) / 2.0);
 
-                                                        let dest = Bounds {
-                                                            origin: point(ox, oy),
-                                                            size: Size {
-                                                                width: px(rw),
-                                                                height: px(rh),
-                                                            },
-                                                        };
+                                                            let dest = Bounds {
+                                                                origin: point(ox, oy),
+                                                                size: Size {
+                                                                    width: px(rw),
+                                                                    height: px(rh),
+                                                                },
+                                                            };
 
-                                                        let _ = win.paint_image(
-                                                            dest,
-                                                            dest,
-                                                            Corners::default(),
-                                                            render_img,
-                                                            0,
-                                                            false,
-                                                        );
-                                                    }
-                                                },
+                                                            let _ = win.paint_image(
+                                                                dest,
+                                                                dest,
+                                                                Corners::default(),
+                                                                render_img,
+                                                                0,
+                                                                false,
+                                                            );
+                                                        }
+                                                    },
+                                                )
+                                                .size_full(),
                                             )
-                                            .size_full(),
-                                        )
-                                    } else {
-                                        div().size_full().flex_1().bg(rgb(0x222222)).rounded_sm()
-                                    }
-                                })
-                                .child(
-                                    div()
-                                        .h(px(20.0))
-                                        .w_full()
-                                        .truncate()
-                                        .text_xs()
-                                        .text_center()
-                                        .text_color(rgb(0xCCCCCC))
-                                        .child(file_name),
-                                )
-                        } else {
-                            div()
-                                .id(SharedString::from(format!("cell-empty-{}", i)))
-                                .size_full()
-                                .invisible()
-                        }
-                    })),
+                                        } else {
+                                            div()
+                                                .w_full()
+                                                .flex_1()
+                                                .bg(gpui::rgb(theme::SURFACE_RAISED))
+                                        }
+                                    })
+                                    .child(
+                                        div()
+                                            .h(px(20.0))
+                                            .w_full()
+                                            .truncate()
+                                            .text_xs()
+                                            .text_center()
+                                            .text_color(gpui::rgb(theme::MUTED))
+                                            .child(file_name),
+                                    )
+                            } else {
+                                div()
+                                    .id(SharedString::from(format!("cell-empty-{}", i)))
+                                    .w_full()
+                                    .invisible()
+                            }
+                        })),
+                )
+            })
+            .child(
+                div()
+                    .pt_2()
+                    .border_t_1()
+                    .border_color(gpui::rgb(theme::BORDER))
+                    .flex()
+                    .gap_4()
+                    .text_xs()
+                    .text_color(gpui::rgb(theme::MUTED))
+                    .child(hint("Arrows", "Move"))
+                    .child(hint("PgUp/PgDn", "Page"))
+                    .child(hint("Enter", "Open"))
+                    .child(hint("Esc", "Close")),
             )
     }
+}
+
+fn hint(key: &'static str, label: &'static str) -> gpui::Div {
+    div()
+        .flex()
+        .items_center()
+        .gap_1p5()
+        .child(
+            div()
+                .px_1p5()
+                .bg(gpui::rgb(theme::SURFACE_RAISED))
+                .border_1()
+                .border_color(gpui::rgb(theme::BORDER))
+                .text_color(gpui::rgb(theme::TEXT))
+                .child(key),
+        )
+        .child(label)
 }

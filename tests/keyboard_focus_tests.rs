@@ -1,11 +1,26 @@
 use frame::frame_app::FrameApp;
 use gpui::{AppContext, TestAppContext};
+use gpui_component::WindowExt;
 use gpui_kit::component::Root;
 use std::fs::File;
 use std::io::Write;
 
 #[gpui::test]
 fn test_keyboard_navigation_startup(cx: &mut TestAppContext) {
+    check_keyboard_navigation(cx, None);
+}
+
+#[gpui::test]
+fn test_keyboard_navigation_after_rename_cancel(cx: &mut TestAppContext) {
+    check_keyboard_navigation(cx, Some("f2"));
+}
+
+#[gpui::test]
+fn test_keyboard_navigation_after_delete_cancel(cx: &mut TestAppContext) {
+    check_keyboard_navigation(cx, Some("delete"));
+}
+
+fn check_keyboard_navigation(cx: &mut TestAppContext, dialog_key: Option<&str>) {
     unsafe {
         std::env::set_var("FRAME_TEST", "1");
     }
@@ -34,13 +49,23 @@ fn test_keyboard_navigation_startup(cx: &mut TestAppContext) {
         app_entity = Some(view.clone());
         Root::new(view, window, cx)
     });
-
     let app = app_entity.expect("app view exists");
 
     let idx_before = cx.update(|_window, cx| app.read(cx).app_state.current_index);
     assert_eq!(idx_before, Some(0));
 
-    // Simulate pressing right arrow directly on the window
+    if let Some(key) = dialog_key {
+        // Exercise the real keybinding and rendered modal, not a direct close call.
+        cx.simulate_keystrokes(key);
+        assert!(cx.update(|window, app_cx| window.has_active_dialog(app_cx)));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        assert!(!cx.update(|window, app_cx| window.has_active_dialog(app_cx)));
+        assert!(img1.exists(), "Cancelling must preserve the original file");
+    }
+
+    // Startup and dialog dismissal must both leave viewer shortcuts usable.
     cx.simulate_keystrokes("right");
 
     let idx_after = cx.update(|_window, cx| app.read(cx).app_state.current_index);

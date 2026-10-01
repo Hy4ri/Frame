@@ -15,11 +15,11 @@
     in {
       packages.default = pkgs.stdenv.mkDerivation rec {
         pname = "frame";
-        version = "2.2.0";
+        version = "2.2.1";
 
         src = pkgs.fetchzip {
           url = "https://github.com/Hy4ri/Frame/releases/download/v${version}/frame-linux-x86_64.tar.gz";
-          hash = "sha256-kvhO/5Q3VBlNn/0mcP/s81vxt+2RlHCceIh3yrUBtAo=";
+          hash = "sha256-P4XAyDpbgpuIs1KABr6lVcXaFJnqnpZpbDnPt8CCjlU=";
           stripRoot = false;
         };
 

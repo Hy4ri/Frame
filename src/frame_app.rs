@@ -354,9 +354,10 @@ impl FrameApp {
             cx.background_executor()
                 .timer(Duration::from_millis(80))
                 .await;
-            if let Some(this) = this.upgrade() {
-                let entity = this.clone();
-                this.update(cx, |_app, cx| {
+            if let Some(entity) = this.upgrade() {
+                // Don't wrap in entity.update(): that leases FrameApp and the
+                // nested entity.update below would double-lease and panic.
+                cx.update(|cx| {
                     if let Some(handle) = cx.windows().first().copied() {
                         let _ = handle.update(cx, |_, win, cx| {
                             entity.update(cx, |this, cx| {
